@@ -1,7 +1,7 @@
 {
   "name": "@meddleware/token-issuance-client",
   "version": "0.0.14",
-  "homepage": "https://dev.meddleware.co.uk/sui/",
+  "homepage": "https://meddleware.dev/sui/",
   "type": "module",
   "description": "Sui token client for @meddleware/token-issuance-template-sui: Move rules, bytecode patching, publish/finalize PTBs, result parsing, owned-token listing and package generation.",
   "author": "MeddleWare <dev@meddleware.co.uk>",
