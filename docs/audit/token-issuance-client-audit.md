@@ -47,7 +47,7 @@ and Rust lenses, SITE, PLATFORM.
 - `npm run e2e:localnet` passed on 2026-10-09 (including a fixed-supply coin with frozen metadata, an
   equal-constants publish, recovery and the capability-less listing).
 
-**Review date:** 2026-10-03, re-verified 2026-10-09 and 2026-10-10 · release status 2026-10-18
+**Review date:** 2026-10-03, re-verified 2026-10-09 and 2026-10-10 · release status 2026-10-18; 0.0.15 re-verified 2026-10-30 (Point links at the machine zone (ADR-0005))
 **Reviewer:** Internal review
 **Severity ceiling:** High.
 
