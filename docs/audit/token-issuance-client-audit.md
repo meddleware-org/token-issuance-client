@@ -18,9 +18,9 @@ It is extracted from token-issuance-ui (workspace B7, 2026-10-02).
 script
 **Template:**
 
-- AUDIT_TEMPLATE.md (2026-10-08)
+- AUDIT_TEMPLATE.md (2026-11-01)
 - AUDIT_TEMPLATE_SUI_CLIENT.md (2026-10-08)
-- AUDIT_TEMPLATE_TS.md (2026-10-08)
+- AUDIT_TEMPLATE_TS.md (2026-11-01)
 - AUDIT_TEMPLATE_OPS.md (2026-10-08) — scoped to `scripts/e2e-localnet.mjs`, which signs on a local
   network only
 
@@ -47,7 +47,7 @@ and Rust lenses, SITE, PLATFORM.
 - `npm run e2e:localnet` passed on 2026-10-09 (including a fixed-supply coin with frozen metadata, an
   equal-constants publish, recovery and the capability-less listing).
 
-**Review date:** 2026-10-03, re-verified 2026-10-09 and 2026-10-10 · release status 2026-10-18; 0.0.15 re-verified 2026-10-30 (Point links at the machine zone (ADR-0005))
+**Review date:** 2026-10-03, re-verified 2026-10-09 and 2026-10-10 · release status 2026-10-18; 0.0.15 released 2026-10-30 (Point links at the machine zone (ADR-0005)); frontend-wave delta review 2026-11-01 (real review of the 2026-10-19 → 2026-11-01 changes; see the delta section)
 **Reviewer:** Internal review
 **Severity ceiling:** High.
 
@@ -198,6 +198,8 @@ generated artefact and template files (`src/template/artifact.ts`, `files.ts`) a
   localnet run that reads the registry's recorded state.
 
 ---
+
+**2026-11-01 update.** The 0.0.15 release (2026-10-30) changed versions, generated comments and the lockfile only; this review re-ran every gate and found nothing to fix (F22, Positive).
 
 ## Threat model / trust boundaries
 
@@ -1010,6 +1012,18 @@ framework pin": only the root pin changes, the revision equals the template's, z
 
 ---
 
+### Frontend wave delta review (2026-11-01) — 0.0.15 reviewed
+
+Scope: the changes since the last substantive entry of this audit: 0.0.15 (2026-10-30: documentation links at the machine zone) after the template rename (2026-10-24, logged). The release tool's "re-verified" mark for the 2026-10-30 release recorded no review; this section is the review. Read the diff of the release commits (version strings and generated comments only — no source or Move change in the wave) and re-ran this repository's gates. Ran: `npm ci`; `npm audit --audit-level=high` (exit 0; nine moderate, the dev-only `minimatch` chain); `tsc --noEmit`; eslint; `vitest` (12 files, 156 tests, including the template-patching and move-lock drift tests); `npm pack --dry-run` (30 files, 165 KiB: `src/`, `dist/*.d.ts`, the bytecode artefact, `CHANGELOG.md`).
+
+### F22 — Positive: the refreshed release passes its own gates, with nothing changed in the shipped logic
+**Severity:** Positive
+**Evidence:** template patching, publish/finalize and result parsing are unchanged since the 2026-10-24 identifier alignment; the 156 tests (including the Move-lock drift test against the template package) pass on the refreshed dependency set.
+
+### Delta notes
+- **A11Y lens:** SDK: not triggered.
+- **Supply chain:** published through the tag-gated trusted-publisher workflow with provenance (unchanged); Dependabot configuration present.
+
 ## Section A — Invariant verification matrix
 
 | # | Invariant | Enforced at | Proven by | Status |
@@ -1452,6 +1466,7 @@ line are rendered in the same literal pass (F18, 0.0.11); the generated `Move.lo
   - Dependabot policy encoded in .github/dependabot.yml (majors declined); open PRs merged 2026-10-19
 - 2026-10-22 (audit close-out) — OQ4 decided (keep (a): `listMyTokens` fails closed beyond `maxHeldCoinTypes`) and OQ5 decided (`engines.node` `>=24`; the field itself is S7, still to be added in the next patch release). No code changed. Counts unchanged.
 - 2026-10-22 (fix wave, 0.0.12; local commits, 0.0.12 not released) — **F9 RESOLVED:** `.github/workflows/localnet.yml` (nightly localnet e2e with the pinned `sui` 1.81.0, an alert issue on a red night), a `localnet-gate` job in `npm-publish.yml` with `.github/localnet-gate.mjs` and `tests/localnet-gate.test.ts`, and `node24-compat` in `node-ci.yml` (CI commit `599b277`, pushed). Proof: dispatched run 39783577436 on main passed (`e2e-localnet: OK`), Node CI 39783566363 green including `node24-compat`, the gate script returned green on the real run list, actionlint clean. **S7 implemented:** `engines.node` `>=24` (package and lockfile root), package test, version 0.0.12 with a CHANGELOG entry (commit pending; not pushed, the orchestrator releases). Measured: vitest 156/156 (12 files), tsc, eslint clean. Section D: the F9 box is ticked as RESOLVED. No other disposition changed; open: F20 (ACCEPTED-RISK) and the maintainer-only external review.
+- 2026-11-01 — frontend-wave delta review of 0.0.15: read the 10-30 release diff (no source change) and re-ran the gates (see the delta section); recorded F22 as Positive. The release tool's bare "re-verified" mark was reworded to "released". `**Template:**` dates reconciled to the 2026-11-01 registry with no disposition change.
 
 ## Pre-save consistency checklist (2026-10-10 re-verification)
 
