@@ -1239,7 +1239,7 @@ line are rendered in the same literal pass (F18, 0.0.11); the generated `Move.lo
 - [x] fee recipient validated in the library — F7
 - [x] chain ids for mainnet drift-tested live (weekly) — A12
 - [x] no raw `btoa`/`atob`, every fetch with a timeout (none), no unjustified assertions at trust boundaries (the `!` lines carry reasons, A16, S6), caller-keyed lookups by own key — F19 (0.0.11, commit `994b951`; `tests/package.test.ts`, `tests/deploy.test.ts`)
-- [ ] external review — maintainer-only (`OPERATOR_TASKS.md`, external review before mainnet)
+- [ ] external review (ADR-0009 gate G4: not a launch gate; covered by redeploy and the audit pass) — maintainer-only (`OPERATOR_TASKS.md`, external review before mainnet)
 
 ---
 
