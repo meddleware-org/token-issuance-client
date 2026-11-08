@@ -154,7 +154,7 @@ function policyNote(cfg: TokenConfig): string {
   lines.push(
     cfg.metadataPolicy === 'frozen'
       ? '- **Frozen metadata**: the MetadataCap was deleted when the package was published, so the name, symbol, description and icon can never change. The registry reports the metadata capability as deleted.'
-      : '- **Updatable metadata**: the MetadataCap is held by the recipient, who can edit the description and icon.',
+      : '- **Updatable metadata**: the MetadataCap is held by the recipient, who can edit the name, description and icon (the symbol and decimals are permanent).',
   )
   lines.push(
     cfg.packagePolicy === 'immutable'

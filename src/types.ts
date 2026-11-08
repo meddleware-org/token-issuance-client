@@ -14,7 +14,7 @@ export type PackagePolicy = 'immutable' | 'upgradeable'
 
 /**
  * Every choice behind a token. `packageName`, `moduleName` and `structName` are baked into the coin
- * type and are permanent; `symbol`, `name` and `decimals` are permanent on-chain.
+ * type and are permanent; `symbol` and `decimals` are permanent on-chain (the `name`, description and icon stay changeable by the `MetadataCap` holder unless metadata is frozen).
  */
 export interface TokenConfig {
   /** Move package name, e.g. "my_token" (snake_case identifier). */
