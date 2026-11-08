@@ -62,7 +62,7 @@
     "fflate": "^0.8.3"
   },
   "devDependencies": {
-    "@meddleware/token-issuance-template-sui": "1.0.13",
+    "@meddleware/token-issuance-template-sui": "1.0.14",
     "@mysten/sui": "^2.33.2",
     "@types/node": "~26.6.5",
     "eslint": "^10.11.0",

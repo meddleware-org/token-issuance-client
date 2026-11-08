@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Comments and the generated package README no longer say the coin name is permanent; it follows the template 1.0.13 (changeable by the `MetadataCap` holder unless metadata is frozen; symbol and decimals are permanent).
+- Comments and the generated package README no longer say the coin name is permanent; it follows the template 1.0.13 (changeable by the `MetadataCap` holder unless metadata is frozen; symbol and decimals are permanent); the generated guides follow template 1.0.14.
 
 ## [0.0.15] - 2026-10-30
 
