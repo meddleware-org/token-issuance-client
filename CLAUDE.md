@@ -56,9 +56,36 @@ deployer) keep only their UI, wallet wiring and form messages.
   call retries). Browsers call `configureTemplateWasm(url | Response | bytes | Module)` first; Node
   needs nothing.
 
+## Layout and commands
+
+Targets: Node.js (CI runs 26 and a Node 24 compatibility job; `engines` is `>=24`) and browsers (via Vite). Version: see `package.json`.
+Runtime dependencies: `@mysten/move-bytecode-template`, `fflate`; peer dependency `@mysten/sui`.
+
+```text
+src/
+├── index.ts          main entry: types, rules, type matching, builders, results, listMyTokens
+├── types.ts          TokenConfig, PublishResult, DeployedToken, OwnedObjectsClient
+├── rules.ts          Move/metadata rules, TOKEN_LIMITS, assertTokenConfig
+├── typeNames.ts      exact, normalised framework-type matching
+├── transactions.ts   publish and finalize PTB builders
+├── results.ts        toSuiTxResult, extractPublishResult (exact types, own package only)
+├── tokens.ts         listMyTokens (paged; throws past the limit)
+├── template/         subpath ./template: wasm set-up, patcher, GENERATED artifact.ts + files.ts
+├── deploy.ts         subpath ./deploy: deployToken, Executor, DeployStep
+└── package.ts        subpath ./package: buildPackageFiles, generatePackageZip
+scripts/gen-template.mjs  writes/checks src/template/{artifact,files}.ts from @meddleware/token-issuance-template-sui
+scripts/e2e-localnet.mjs  real deploy against `sui start --with-faucet --force-regenesis`
+```
+
+`npm run type-check`, `npm run lint`, `npm test`, `npm run e2e:localnet` (needs a local network), `npm run gen:template` /
+`npm run check:template`, `npm run build` (the `.d.ts`). Never hand-edit `src/template/artifact.ts` or `src/template/files.ts`; bump the
+exact `@meddleware/token-issuance-template-sui` devDependency and run `npm run gen:template`.
+
+Release: bump `version`, push, tag `v<version>`; `npm-publish.yml` publishes via npm trusted publishing. Licence: 0BSD.
+
 ## Testing
 
-`npm test` (vitest, 148 tests): rules, type matching (look-alike packages, nested generics, long-form
+`npm test` (vitest, 156 tests): rules, type matching (look-alike packages, nested generics, long-form
 addresses), builders (exact PTB commands), result parsing, deploy flow with a mock executor, wasm
 initialisation, patching, Walrus-URL icons, package generation, paged token listing.
 `tests/abi-table.test.ts` fails if an exported builder is missing from the ABI table
