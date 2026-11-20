@@ -100,3 +100,7 @@ generated package; a fixed-supply, frozen-metadata coin (no caps exist, the regi
 (`.github/workflows/localnet.yml`, pinned `sui` 1.81.0, no secret) and `npm-publish.yml` refuses a tag while
 the latest run on main is red, missing or older than 72 h (`.github/localnet-gate.mjs`; dispatch
 "Localnet e2e" before tagging). `node-ci.yml` also runs `npm test` on Node 24 (`node24-compat`).
+
+## Interoperability
+
+- [docs/INTEROP.md](docs/INTEROP.md): the standards this project speaks, what is planned, where to extend it, and what proves each claim.
