@@ -24,11 +24,20 @@ script
 - AUDIT_TEMPLATE_OPS.md (2026-10-08) — scoped to `scripts/e2e-localnet.mjs`, which signs on a local
   network only
 
+**Added 2026-11-21 (Part B documentation pass):** AUDIT_TEMPLATE_DOCS.md (2026-11-20); AUDIT_TEMPLATE_RFC.md (2026-11-19), partial: the Move bytecode format and the ZIP archive the package produces,
+SPDX identifiers, URLs; AUDIT_TEMPLATE_IOP.md (2026-11-19), partial: the downloadable source package (portability), public API and the dependency list; AUDIT_TEMPLATE_PRIV.md (2026-11-20), partial: what
+the client sends and stores (nothing is stored).
+
 Not triggered: SUI (no Move here — the template is `token-issuance-template-sui`'s audit), SEAL, WALRUS (icon
 URLs are text; uploads live in token-issuance-ui), VUE, AUTH, IMG (no image), PROXY, WORKERS, the Go
 and Rust lenses, SITE, PLATFORM.
 
 **Deployment status:**
+
+- *(Current, 2026-11-21: npm **`0.0.16` is `latest`** (tag `v0.0.16` = `f7dc865`); four commits since the tag (the external-review gate note, `DO_NOT_TRACK`, the single instruction file and the INTEROP
+  page), nothing under `src/`. The tarball is 30 files, 194.0 kB unpacked, 54.2 kB packed (`npm pack --dry-run`). Two packages depend on it, both at `^0.0.16`: `token-issuance-ui` and `dev-site`.
+  One Dependabot pull request is open (#14, the minor and patch group, 4 updates). The nightly localnet e2e passed on 2026-11-19, 20 and 21 and the weekly live suite on 2026-11-02, 09 and 16. The
+  entries below are history, kept as written.)*
 
 - npm `@meddleware/token-issuance-client` **0.0.11** (`latest`, published 2026-10-10T14:54Z), published from tag
   `v0.0.11` = `616b7ac` (code commit `994b951`, plus the Dependabot lockfile-only bump `fb7301b` since 0.0.10),
@@ -60,6 +69,8 @@ and Rust lenses, SITE, PLATFORM.
   Realised ceiling at 2026-10-09: **Info** (no open finding above Info: F11, F17–F20). At 2026-10-10 the
   only open finding is F20 (Info, ACCEPTED-RISK).
 
+**Documentation pass 2026-11-21 (0.0.16 current):** F23 (documentation drift) is RESOLVED. The status below is the earlier one.
+
 **Status:** re-verified 2026-10-10, 0.0.11 work (first-pass baseline 2026-10-03); 0.0.11 released 2026-10-10 and
 consumed by token-issuance-ui (2026-10-18).
 
@@ -67,6 +78,19 @@ consumed by token-issuance-ui (2026-10-18).
   (2026-07-30).
 - Its findings 4 (icon URL scheme) and 5 (silent degradation of `extractPublishResult`) apply to code
   that now lives here. Both are resolved, as re-verified in F14.
+
+**Front matter (DOCS, RFC, IOP and PRIV lenses, added 2026-11-21):**
+
+| Field | Value |
+| --- | --- |
+| Documentation status | ledger (workspace `docs/audit/DOCS_LEDGER.tsv`): 53 tracked files, 50 done (49 measured against the thresholds), 3 excluded (the lockfile, `LICENSE`, the generated `docs/INTEROP.md`), 0 pending, 0 fu (2026-11-21 pass) |
+| Required documents | README, CHANGELOG, SECURITY, CONTRIBUTING (added 2026-11-21), LICENSE (0BSD), CLAUDE.md, AGENTS.md: all present |
+| Doc lints | `check-docs.mjs` (workspace) is the gate. The shared `eslint-plugin-jsdoc` fragment is switched on here after the Phase 5 release of `@meddleware/eslint-config` |
+| Standards spoken | Move bytecode (the compiled module format, decoded and re-encoded by `@mysten/move-bytecode-template`) — patches constants and identifiers and re-verifies; Sui coin and coin-registry framework (`0x2::coin`, `0x2::coin_registry`) — consumes, matching types exactly; BCS — encodes the patched constants; SPDX licence identifiers — validates and writes them; ZIP (PKWARE APPNOTE, through `fflate`) — the downloadable package; TOML (Move.toml, Published.toml) — writes; URL syntax (RFC 3986) — the icon URL is restricted to `https:` and `ipfs:`; gRPC (`@mysten/sui/grpc`) — consumes through structural client types; SPDX `0BSD`, Sigstore / SLSA — as the other packages |
+| Deviations | none |
+| Drafts relied on | none. The Sui coin registry is Mysten's framework, not an IETF or W3C document |
+| Data a person can take away | everything: the downloadable source package is the whole token (Move source, `Move.toml`, `Move.lock`, `Published.toml`, README, licence) and rebuilds the same bytecode; the coin itself is on-chain |
+| Personal data | none held. The deployer's address and the recipient's address are public chain data; nothing is stored |
 
 **Package manager / lockfile:** npm; `package-lock.json` committed (CI and publish install with `npm ci`).
 **Module format:** ESM.
@@ -1020,6 +1044,26 @@ Scope: the changes since the last substantive entry of this audit: 0.0.15 (2026-
 **Severity:** Positive
 **Evidence:** template patching, publish/finalize and result parsing are unchanged since the 2026-10-24 identifier alignment; the 156 tests (including the Move-lock drift test against the template package) pass on the refreshed dependency set.
 
+### Part B documentation pass (2026-11-21)
+
+Scope: every tracked file read against the workspace's `docs/operations/DOCUMENTATION_STANDARD.md` and annotated (Part B Phase 1, the twelfth repository, the fifth of the clients); the DOCS, RFC, IOP and
+PRIV lenses applied for the first time. Before and after editing: `npm ci`, type-check, lint, the 156 unit tests, `npm run check:template`, the declaration build and `npm audit --audit-level=high` (exit 0)
+passed. The diff is comment-only: the TypeScript compiles to identical output with comments removed, the generated `src/template/` files are byte-identical (the generator's new comments are outside its
+output), the YAML parses to identical values (the shell comments inside `run:` blocks aside), and `.gitignore` and the JSON configurations parse alike. One script differs textually, by comments only:
+`scripts/ts-resolve.mjs` carries its loader hook as a string, and the hook's text gained comments; the hook was run and still resolves `./x.js` to `./x.ts`. The real-chain end to end
+(`npm run e2e:localnet`) needs the `sui` CLI and was not run here; its nightly CI run was green on 2026-11-19 to 21 and nothing it exercises changed in behaviour.
+
+### F23 — Documentation drift found by the documentation pass
+**Severity:** Low   **Disposition:** RESOLVED (2026-11-21, unreleased)
+**Where:** this audit, `README.md`, `CLAUDE.md`.
+**Issue:** (1) this audit gave an earlier version as current and two consumers at older ranges; npm has 0.0.16 and both consumers are at `^0.0.16`; (2) the README's Development section named four
+commands and none of the CI checks (no type-check, lint, build or audit); (3) CLAUDE.md had a layout and testing section but no Commands, Gotchas or Related section, and did not warn that the generator's
+template literals and `scripts/ts-resolve.mjs`'s string hold generated text (a comment with a backtick there changes the output); (4) there was no `CONTRIBUTING.md`; (5) `scripts/gen-template.mjs`,
+`scripts/e2e-localnet.mjs` and `scripts/ts-resolve.mjs` had few comments and no statement of what they read, write and spend.
+**Impact:** none on the shipped code. A contributor could not tell what CI runs, nor what the end-to-end script publishes and where.
+**Remediation / evidence:** the facts above are checked against npm and the consumers' manifests; the documents are completed; the three scripts are documented section by section and
+`npm run check:template` passes (the generated files are unchanged).
+
 ### Delta notes
 - **A11Y lens:** SDK: not triggered.
 - **Supply chain:** published through the tag-gated trusted-publisher workflow with provenance (unchanged); Dependabot configuration present.
@@ -1176,6 +1220,56 @@ line are rendered in the same literal pass (F18, 0.0.11); the generated `Move.lo
 
 ---
 
+### B.DOCS-1 Ledger state
+
+53 tracked files: 50 done (49 measured against the thresholds), 3 excluded (lockfile, licence text, generated `docs/INTEROP.md`), 0 pending, 0 `fu:` rows (2026-11-21, commit recorded in the ledger).
+
+### B.DOCS-2 Commands run
+
+Every command in the README's Development section, CLAUDE.md's Commands section and CONTRIBUTING.md was run on 2026-11-21 and gave what the documents say, except the two that need outside help:
+`npm ci`, `npm run type-check`, `npm run lint`, `npm test` (156 tests), `npm run check:template`, `npm run build`, `npm audit --audit-level=high` (exit 0) and `npm pack --dry-run` (30 files).
+`npm run e2e:localnet` (needs the `sui` CLI) was not run; `npm run test:integration` reads public nodes and was not re-run (nothing in it changed).
+
+### B.DOCS-3 Generated documentation
+
+`src/template/artifact.ts` and `src/template/files.ts` are generated by `scripts/gen-template.mjs` from the pinned `@meddleware/token-issuance-template-sui` 1.0.14 and checked by
+`npm run check:template`; their text is written in the generator. `docs/INTEROP.md` is generated by the workspace's `scripts/interop/gen-interop.py` from `config/interop.yaml`. `dist/*.d.ts` is built
+by `npm run build` and not tracked.
+
+### B.RFC-1 Standards inventory
+
+| Interface | Standard (and version) | Role | Where | Conformance evidence | Deviation |
+| --- | --- | --- | --- | --- | --- |
+| Compiled module | Move bytecode (format v7, `@mysten/move-bytecode-template` `~0.4.1`) | patches and re-verifies | `src/template/patch.ts` | `tests/template.test.ts` (real WASM and template), the localnet e2e (the on-chain verifier is the judge) | the patcher edits the decoded module because the library's own helpers do not round-trip v7 |
+| Coin and registry | Sui framework `0x2::coin`, `0x2::coin_registry` | consumes; types matched exactly | `src/typeNames.ts`, `src/results.ts` | `tests/typeNames.test.ts`, the e2e's registry-state checks | — |
+| Package files | Move.toml, Move.lock, Published.toml (Sui ≥ 1.63 convention) | writes | `src/package.ts` | `tests/package.test.ts`, `tests/move-lock-drift.test.ts` | the lock is the template's, with one line renamed |
+| Archive | ZIP (PKWARE APPNOTE; `fflate`) | writes | `generatePackageZip` | `tests/package.test.ts` (round trip) | — |
+| Licence | SPDX identifiers | validates and writes | `src/rules.ts`, `src/package.ts` | `tests/rules.test.ts`, `tests/package.test.ts` | `NONE`/`UNLICENSED` are accepted as "proprietary" |
+| Icon | URL syntax (RFC 3986), `https:` and `ipfs:` | restricts | `hasAllowedIconScheme` | `tests/rules.test.ts` | `http:`, `data:` and `javascript:` are refused on purpose |
+| Node transport | gRPC (`@mysten/sui/grpc`) | consumes, through structural types | `src/types.ts` | `tests/integration/`, the e2e | JSON-RPC is deprecated SDK-wide and is not used |
+| Provenance | Sigstore / SLSA (npm provenance) | consumes | `npm-publish.yml` | `dist.attestations` on npm | — |
+
+### B.IOP-1 Export and exit drill
+
+The person's token is portable by construction: the downloadable source package (`generatePackageZip`) is the complete Move package, and building it with the Sui CLI reproduces the published bytecode
+(`Published.toml` records the toolchain). The coin lives on-chain and the capabilities are objects the person owns. The package holds nothing, so there is nothing to export from it.
+
+### B.IOP-2 Exit register entries
+
+npm (publication) and GitHub Actions (CI, including the nightly localnet run and the weekly live run). The Sui full node is the caller's choice. The Move template is Meddleware's own and open (0BSD); the
+Sui framework and the Mysten SDK are upstream dependencies with no substitute, recorded in the platform's exit register.
+
+### B.IOP-3 API stability
+
+The public API is everything exported from `src/index.ts` and the `./template`, `./deploy` and `./package` subpaths. Versioning is patch-only until mainnet (workspace policy), so a consumer's `^0.0.x` is an
+exact pin; a rename or removal is a breaking change and is announced in `CHANGELOG.md`. A token's names, supply and policies are permanent once published, so the rules (`TOKEN_LIMITS`, the validators) are
+part of the contract and change only with a release.
+
+### B.PRIV-1 / B.PRIV-2 / B.PRIV-3 Privacy inventories
+
+Personal data: none held. Addresses are public chain data. Client-side: nothing is written to a browser or to disk (the end-to-end script keeps a random key in memory only). Requests: to the Sui node the
+caller names (and, for the e2e, a local faucet); no other host, no analytics, no logging. Recorded 2026-11-21.
+
 ## Section C — Test-coverage & hermetic/live split
 
 ### C.1 Coverage grade — A (148/148; 97.92% statements, 90.97% branches, 100% functions, 99.17% lines; 2026-10-10)
@@ -1331,6 +1425,21 @@ line are rendered in the same literal pass (F18, 0.0.11); the generated `Move.lo
 | OPS-M8 | yes (no real-chain job exists; `live.yml` is read-only) | B.2 |
 | OPS-M9 | N/A (touches no global CLI state) | — |
 
+**Lens baselines (DOCS, RFC, IOP, PRIV), first recorded 2026-11-21:**
+
+| ID | Holds? | Evidence |
+| --- | --- | --- |
+| DOCS-M1 | yes (all seven documents; 0BSD; CHANGELOG per release with an Unreleased section) | B.DOCS-1 |
+| DOCS-M2 | yes (every file's header and every declaration documented; ledger rows done) | `check-docs.mjs --report token-issuance-client` |
+| DOCS-M3 | yes (the entries, the policies and what is permanent, the release gate are in the README and CLAUDE.md) | README, CLAUDE.md |
+| DOCS-M4 | yes (commands run, links resolve, ids exist; the two commands that need outside help are named) | B.DOCS-2 |
+| DOCS-M5 | yes (no TODO, FIXME, XXX or HACK) | `check-docs.mjs` |
+| DOCS-M6 | yes (CLAUDE.md verified against the code, F23; AGENTS.md points to it) | this pass |
+| DOCS-M7 | yes (no secrets or private data; the e2e key is random and in memory only) | inspection |
+| RFC-M1 to RFC-M7 | yes where they apply (B.RFC-1); M5 is the hosts', not a package's | B.RFC-1 |
+| IOP-M1, IOP-M3, IOP-M5 | yes (B.IOP-1, B.IOP-3; no ads, no tracking); IOP-M2, M4, M6, M7: not applicable (no data held, no service) | B.IOP-1 to 3 |
+| PRIV-M1 to PRIV-M8 | yes: nothing stored, nothing requested from any host but the caller's node | B.PRIV |
+
 ## Implementation suggestions (SHOULD / MAY)
 
 - **S1** (F1) *Implemented in 0.0.6:* the patcher decodes and checks its own output
@@ -1483,3 +1592,11 @@ line are rendered in the same literal pass (F18, 0.0.11); the generated `Move.lo
 - [x] Re-verification log entry added.
 - 2026-10-24 — repository renamed from `sui-token-client` to `token-issuance-client` (workspace naming convention, `docs/architecture/ADR-0003-naming.md`): package, image, host and path names updated throughout. No finding, disposition or evidence changed.
 - 2026-10-24 — identifier alignment (`docs/architecture/ADR-0004-identifier-alignment.md`): patches the renamed template identifiers; 156 tests pass; `e2e:localnet` OK (publish, finalize, fixed/frozen, recovery, generation) against template 1.0.11.
+- 2026-11-21 — Part B documentation pass and first application of the DOCS, RFC, IOP and PRIV lenses (above, "Part B documentation pass"). Baseline before editing: `npm ci`, type-check, lint, 156 tests,
+  `check:template`, the declaration build, `npm audit --audit-level=high`. Every tracked file annotated to the documentation standard (headers, doc comments on every declaration and interface member, a
+  reason beside each statement group; the generator, the end-to-end script and the resolver hook documented); `CONTRIBUTING.md` added; README Development section; CLAUDE.md Commands, Gotchas and Related
+  sections. Found and fixed **F23** (documentation drift). No defect found in the code. Verified live: npm `0.0.16` latest; two consumers read from their manifests; Dependabot #14 open; the nightly localnet
+  e2e green on 2026-11-19 to 21 and the weekly live suite on its last three runs. Re-run after editing: the same commands, all passing; the diff proven comment-only (compiled output, parsed YAML,
+  `.gitignore` patterns, JSON configurations, the generated template files byte-identical). Counts: F1 to F23.
+- [x] 2026-11-21: Template line cites DOCS, RFC, IOP and PRIV with their registry dates; their front-matter fields, Section B subsections and MUST rows added; F23 recorded in the findings and the log;
+  the deployment status, packaging, test counts and consumers current.

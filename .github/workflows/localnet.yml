@@ -12,9 +12,11 @@ on:
   schedule:
     - cron: '17 3 * * *' # 03:17 UTC nightly
 
+# Read-only by default; the alert job below is the only one that may write issues.
 permissions:
   contents: read
 
+# No tool may phone home from CI (the fleet's privacy rule).
 env:
   DO_NOT_TRACK: "1"
 
@@ -22,14 +24,18 @@ jobs:
   localnet:
     name: token-issuance-client localnet e2e
     runs-on: ubuntu-latest
+    # A hung node must not occupy a runner for hours.
     timeout-minutes: 20
     steps:
+      # Actions are pinned by full commit SHA with the version in a comment (D12).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Node 26 is the fleet baseline (D56).
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
 
+      # The Sui CLI that runs the local network; the installer and the binary are both pinned by checksum.
       - name: Install sui CLI (suiup)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -44,9 +50,11 @@ jobs:
           "$HOME/.local/bin/sui" --version
           echo "c86c0481a44174dfa17af89e71292d6fba5df267c66722ae6797e8793a22f7f1  $HOME/.local/bin/sui" | sha256sum -c -
 
+      # The package's own dependencies (the end-to-end script imports the sources).
       - name: Install dependencies
         run: npm ci
 
+      # A fresh chain every run (`--force-regenesis`); the loop waits up to three minutes for the faucet and the gRPC port.
       - name: Start the local network (gRPC :9000, faucet :9123)
         run: |
           mkdir -p "$RUNNER_TEMP/localnet"
@@ -63,9 +71,11 @@ jobs:
           tail -n 50 sui.log || true
           exit 1
 
+      # The real-chain end to end; the script refuses a public chain identifier.
       - name: Run the localnet e2e
         run: npm run e2e:localnet
 
+      # Only on failure: the node's own log, the first place to look.
       - name: Local network log (on failure)
         if: failure()
         run: tail -n 80 "$RUNNER_TEMP/localnet/sui.log" || true

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Documentation: every file is annotated line by line and has a header; added `CONTRIBUTING.md`; README Development section; CLAUDE.md Commands, Gotchas and Related.
+- `scripts/gen-template.mjs`, `scripts/e2e-localnet.mjs` and `scripts/ts-resolve.mjs` are documented section by section; the generated `src/template/` files are unchanged (`npm run check:template` passes).
+- No behaviour change: the compiled output of `src/` is identical.
+
 ## [0.0.16] - 2026-11-08
 
 ### Fixed

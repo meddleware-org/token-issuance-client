@@ -4,20 +4,24 @@ name: Publish (npm)
 # `verify` job that runs the same workflow as CI (audit, template artefact, type-check, lint, tests,
 # declarations) on the exact tagged commit, and on a `localnet-gate` job that refuses the tag while the
 # localnet e2e (localnet.yml) is red, missing or stale, so a broken tag never ships.
-# Authentication uses npm OIDC trusted publishing — no long-lived NPM_TOKEN.
+# Authentication uses npm OIDC trusted publishing — no long-lived NPM_TOKEN. The release steps are in the workspace's
+# PUBLISHING.md: tag, wait for this workflow, and re-run the failed job if Sigstore answers 500 or 409 (transient).
 
 on:
   push:
     tags:
       - 'v*'
 
+# Read-only by default; only the publish job is granted an OIDC token.
 permissions:
   contents: read
 
+# No tool may phone home from CI (the fleet's privacy rule).
 env:
   DO_NOT_TRACK: "1"
 
 jobs:
+  # The whole CI workflow, on the tagged commit.
   verify:
     name: Verify (CI checks)
     uses: ./.github/workflows/node-ci.yml
@@ -38,6 +42,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
+      # `gh run list` as JSON on stdin; `.github/localnet-gate.mjs` reads it, and its exit code is the verdict (tested in tests/localnet-gate.test.ts).
       - name: Latest localnet run
         env:
           GH_TOKEN: ${{ github.token }}
@@ -60,13 +65,16 @@ jobs:
         with:
           node-version: '26'
           registry-url: 'https://registry.npmjs.org'
-      # Trusted publishing (OIDC) requires npm >= 11.5.1; Node 24 ships an older npm.
+      # Trusted publishing (OIDC) requires npm >= 11.5.1. The npm bundled with Node changes with every Node release, so the
+      # version is pinned (D12) and is the same in every repo's publish job.
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@11.20.0
       - name: Install dependencies
         run: npm ci
+      # `prepublishOnly` would also build, but building here fails the job before the publish step if the declarations cannot be produced.
       - name: Build
         run: npm run build
+      # A tag that names a different version than package.json would publish the wrong number under the tag's provenance.
       - name: Tag matches the package version
         env:
           TAG: ${{ github.ref_name }}
@@ -81,6 +89,7 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           NAME=$(node -p "require('./package.json').name")
+          # The registry URL encodes the scope's slash.
           ENC=$(printf '%s' "$NAME" | sed 's#/#%2f#')
           # Check the registry directly — `npm view` can transiently miss a freshly
           # first-published version and then attempt a re-publish. A 200 means it's live.
@@ -89,6 +98,7 @@ jobs:
           else
             # Publish, but treat a "version already exists" error as success so a
             # manually-published version (or a registry race) leaves the job green.
+            # --provenance links the published version to this workflow run (Sigstore).
             set +e; OUT=$(npm publish --provenance --access public 2>&1); RC=$?; set -e
             printf '%s\n' "$OUT"
             if [ "$RC" -ne 0 ]; then

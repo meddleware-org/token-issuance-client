@@ -1,12 +1,18 @@
+/**
+ * Tests for the wallet's token list (`src/tokens.ts`): coins found by owned capabilities (once per coin type, look-alikes ignored, every page read, bounded) and coins with no capability
+ * (held and published by this wallet), with bounded, deduplicated publisher lookups that never skip a failure silently. The chain is a double.
+ */
 import { describe, it, expect, vi } from 'vitest'
 import { listMyTokens } from '../src/tokens.js'
 import type { OwnedObjectsClient } from '../src/types.js'
 
+// A package, another package, an owner and the SUI coin type (placeholders: the chain is a double).
 const PKG = '0x' + 'ab'.repeat(32)
 const OTHER_PKG = '0x' + 'ef'.repeat(32)
 const OWNER = '0x' + 'cd'.repeat(32)
 const SUI = '0x2::sui::SUI'
 
+/** What the client double serves; each field is optional so a test sets only what it needs. */
 interface Fake {
   /** Owned objects per type filter, in pages. */
   owned?: Record<string, { objectId: string; type: string }[][]>
@@ -16,6 +22,7 @@ interface Fake {
   publishers?: Record<string, string>
 }
 
+/** A client double over `fake`, paged by index (the cursor is the page number), with spies on every call so a test can count lookups. */
 function client(fake: Fake = {}) {
   const listOwnedObjects = vi.fn(async ({ type, cursor }: { type?: string; cursor?: string | null }) => {
     const pages = fake.owned?.[type ?? ''] ?? [[]]
@@ -38,6 +45,7 @@ function client(fake: Fake = {}) {
   return { core: { listOwnedObjects, listBalances, getObject, getTransaction } } satisfies OwnedObjectsClient
 }
 
+/** The type filters the listing sends for the two capabilities. */
 const TREASURY = '0x2::coin::TreasuryCap'
 const METADATA = '0x2::coin_registry::MetadataCap'
 
@@ -63,6 +71,7 @@ describe('listMyTokens: owned capabilities', () => {
     ])
   })
 
+  // One coin, one row, whichever capability the wallet holds.
   it('merges a TreasuryCap and a MetadataCap of the same coin into one entry, and lists a coin with only a MetadataCap', async () => {
     const c = client({
       owned: {
@@ -81,6 +90,7 @@ describe('listMyTokens: owned capabilities', () => {
     ])
   })
 
+  // The type is matched exactly at 0x2; a `TreasuryCap` defined elsewhere must not list a coin the wallet cannot mint.
   it('ignores a look-alike capability from another address', async () => {
     const c = client({
       owned: {
@@ -117,6 +127,7 @@ describe('listMyTokens: coins with no capability (fixed supply, frozen metadata)
     expect(await listMyTokens(c, OWNER)).toEqual([{ coinType: `${PKG}::fixed::FIXED`, packageId: PKG, label: 'FIXED' }])
   })
 
+  // Holding a balance of someone else's coin (an airdrop, a payment) does not make it the wallet's own token.
   it('does not list a held coin someone else published (a coin merely received)', async () => {
     const c = client({ balances: [[`${OTHER_PKG}::x::X`]], publishers: { [OTHER_PKG]: '0x' + '11'.repeat(32) } })
     expect(await listMyTokens(c, OWNER)).toEqual([])
@@ -127,6 +138,7 @@ describe('listMyTokens: coins with no capability (fixed supply, frozen metadata)
     expect(await listMyTokens(c, OWNER)).toHaveLength(1)
   })
 
+  // Every wallet holds SUI; looking up its publisher would waste two reads per listing, and a system package is never a user's coin.
   it('never looks up SUI or other system packages', async () => {
     const c = client({ balances: [[SUI, '0x1::foo::Foo', `0x${'0'.repeat(63)}2::sui::SUI`]] })
     expect(await listMyTokens(c, OWNER)).toEqual([])
@@ -153,6 +165,7 @@ describe('listMyTokens: coins with no capability (fixed supply, frozen metadata)
     await expect(listMyTokens(client({ balances: [[], [], []] }), OWNER, { maxPages: 2 })).rejects.toThrow(/more than 2 pages of balances/)
   })
 
+  // A coin that silently disappears from the list is worse than an error the person can retry.
   it('surfaces a failed lookup instead of silently dropping the coin', async () => {
     const c = client({ balances: [[`${PKG}::a::A`]], publishers: { [PKG]: OWNER } })
     c.core.getTransaction.mockRejectedValueOnce(new Error('node unavailable'))

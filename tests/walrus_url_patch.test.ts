@@ -1,8 +1,14 @@
+/**
+ * A test for patching a long, realistic value: a Walrus blob URL of about 100 characters (the kind an icon uploaded to Walrus has) as the icon URL must produce a valid module whose
+ * constant pool holds that exact text. Uses the real WASM and template.
+ */
 import { describe, it, expect } from 'vitest'
 import init, { deserialize } from '@mysten/move-bytecode-template'
 import { patchTemplateModule } from '../src/template/patch.js'
 
+/** The text of a string constant's bytes (the first byte is the length prefix, dropped). */
 const asStr = (data: number[]) => Buffer.from(data.slice(1)).toString('utf8')
+/** The part of a decoded module this test reads. */
 interface Decoded { constant_pool: { type_: unknown; data: number[] }[] }
 
 describe('Walrus blob URL patching', () => {

@@ -1,3 +1,7 @@
+/**
+ * Tests for the token rules (`src/rules.ts`): identifiers and reserved words, the names the template and the framework already use, text that could break a Move byte string, icon
+ * schemes, decimals and supply (including overflow of a u64), the fixed-supply rule, the recipient and the licence fields. Each rule guards a cost the person would meet only after paying.
+ */
 import { describe, it, expect } from 'vitest'
 import {
   assertLicenseText,
@@ -14,6 +18,7 @@ import {
 } from '../src/rules.js'
 import type { TokenConfig } from '../src/types.js'
 
+// A valid configuration; `bad` breaks one field of it.
 const good: TokenConfig = {
   packageName: 'my_token',
   moduleName: 'mytoken',
@@ -32,6 +37,7 @@ const good: TokenConfig = {
   packageDescription: 'd',
   projectName: 'p',
 }
+/** A function that asserts a configuration with `over` applied, so a test can expect it to throw. */
 const bad = (over: Partial<TokenConfig>) => () => assertTokenConfig({ ...good, ...over })
 
 describe('deriveStructName', () => {
@@ -59,6 +65,7 @@ describe('assertTokenConfig', () => {
     expect(() => assertTokenConfig({ ...good, iconUrl: '', description: '' })).not.toThrow()
   })
 
+  // Sui's one-time-witness rule: a differently named struct would make `init` unusable and the publish would fail.
   it('requires the struct name to be the uppercased module name', () => {
     expect(bad({ structName: 'OTHER' })).toThrow(/struct name/)
   })
@@ -76,6 +83,7 @@ describe('assertTokenConfig', () => {
     expect(() => assertTokenConfig({ ...good, packageDescription: 'A fine token.', projectName: 'My Project' })).not.toThrow()
   })
 
+  // A module named like something the template imports would duplicate an identifier and fail verification on-chain, after the person has paid.
   it('rejects module names the template module already uses, and framework package names', () => {
     // A duplicate identifier would fail bytecode verification on-chain, after gas is spent.
     for (const name of ['coin', 'transfer', 'string', 'init', 'coin_registry', 'tx_context']) {
@@ -95,12 +103,14 @@ describe('assertTokenConfig', () => {
     expect(bad({ iconUrl: 'https://' + 'i'.repeat(TOKEN_LIMITS.iconUrl) })).toThrow(/icon URL/)
   })
 
+  // The text is written into a Move `b"…"` literal; a quote or a backslash would end it early and change the source.
   it('rejects characters that would break a Move byte string', () => {
     for (const v of ['a"b', 'a\\b', 'a\nb', 'a\u0000b', 'é']) {
       expect(bad({ description: v })).toThrow(/quotes, backslashes or control/)
     }
   })
 
+  // `javascript:`, `data:` and plain `http:` icons must never reach the coin's on-chain metadata.
   it('allows only https:// and ipfs:// icons', () => {
     expect(bad({ iconUrl: 'javascript:alert(1)' })).toThrow(/icon URL/)
     expect(bad({ iconUrl: 'http://example.com/i.png' })).toThrow(/icon URL/)
@@ -121,6 +131,7 @@ describe('assertTokenConfig', () => {
     expect(() => assertTokenConfig({ ...good, supplyPolicy: 'mintable', initialSupply: 0n })).not.toThrow()
   })
 
+  // The minted amount is whole tokens times 10^decimals; the same supply can fit at 6 decimals and overflow at 18.
   it('rejects a supply that overflows u64 at the chosen precision', () => {
     expect(bad({ decimals: 18, initialSupply: MAX_U64 / 10n ** 18n + 1n })).toThrow(/initial supply/)
     expect(() => assertTokenConfig({ ...good, decimals: 0, initialSupply: MAX_U64 })).not.toThrow()
@@ -134,6 +145,7 @@ describe('assertTokenConfig', () => {
 })
 
 describe('small helpers', () => {
+  // A leading space or capital letters must not hide a bad scheme, nor make a good one fail.
   it('hasAllowedIconScheme is case-insensitive and trims', () => {
     expect(hasAllowedIconScheme('  HTTPS://x')).toBe(true)
     expect(hasAllowedIconScheme('ftp://x')).toBe(false)
@@ -153,6 +165,7 @@ describe('small helpers', () => {
 })
 
 describe('validateModuleName / validatePackageName', () => {
+  // The message a person sees should be the first thing to fix: a malformed name is reported as malformed, not as a collision.
   it('apply the identifier rules first, then the collision rules', () => {
     expect(validateModuleName('my_coin')).toBeNull()
     expect(validateModuleName('Coin')).toMatch(/lowercase/)
@@ -172,6 +185,7 @@ describe('licence fields', () => {
     expect(() => assertTokenConfig({ ...good, licenseName: 'a\nb' })).toThrow(/license name/)
   })
 
+  // A real licence has newlines and quotes (it is a text file, not source); only size and NUL bytes are refused.
   it('accepts a real multi-line licence text and refuses an oversized or NUL-containing one', () => {
     expect(() => assertLicenseText('Permission is hereby granted, "free of charge"\nto any person…')).not.toThrow()
     expect(() => assertLicenseText('x'.repeat(TOKEN_LIMITS.licenseText + 1))).toThrow(/maximum/)

@@ -1,3 +1,6 @@
+/**
+ * Tests for exact type matching (`src/typeNames.ts`): framework types match only at address `0x2` in short or long form, nested generics stay intact, and a look-alike never matches.
+ */
 import { describe, it, expect } from 'vitest'
 import { frameworkTypeArgument, isFrameworkType, normalizeType, treasuryCapCoinType, typePackage } from '../src/typeNames.js'
 

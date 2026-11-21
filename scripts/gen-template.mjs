@@ -7,6 +7,16 @@
 // build-info.json, the module decodes and re-encodes byte for byte, and the identifiers and the
 // default constants the patcher replaces are present in both the source and the constant pool.
 // `--check` fails (exit 1) when the committed files differ from what the package produces.
+//
+// Why a generator: the module a person publishes is compiled bytecode, and the package they download is rendered from the template's text files. Both must come from the SAME release of the
+// template, and the patcher depends on exact facts about the bytecode (which constants exist, once each). Copying either by hand would let them drift apart silently, so they are produced
+// together, verified before they are written, and checked in CI (`npm run check:template`).
+//
+// Usage:      node scripts/gen-template.mjs [--check]     (npm run gen:template / check:template)
+// Reads:      the installed @meddleware/token-issuance-template-sui (a devDependency, pinned exactly): its bytecode, build-info.json, sources and templates; and src/rules.ts (one list is cross-checked).
+// Writes:     src/template/artifact.ts and src/template/files.ts (without --check only). Nothing else, and nothing outside the repository.
+// Exit codes: 0 written or matching; 1 on any failed check or on drift under --check.
+// Node built-ins and the Move bytecode helpers only: the script adds no dependency of its own.
 import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -15,18 +25,26 @@ import { fileURLToPath } from 'node:url'
 import { deserialize, serialize } from '@mysten/move-bytecode-template'
 import { bcs } from '@mysten/sui/bcs'
 
+// The repository root, found from this file so the script works from any directory; the template package is resolved the way Node would from here (the pinned copy).
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(join(root, 'package.json'))
 const pkgDir = dirname(require.resolve('@meddleware/token-issuance-template-sui/package.json'))
+// The template's version goes into the generated headers, so a reader sees which release the artefact comes from.
 const { version } = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'))
+/** The bytes of a file inside the template package. */
 const read = (p) => readFileSync(join(pkgDir, p))
+/** The SHA-256 of some bytes, in hex. */
 const sha = (b) => createHash('sha256').update(b).digest('hex')
+/** Print a message and stop the generator (exit 1): a failed check must never produce a file. */
 const fail = (msg) => {
   console.error(`gen-template: ${msg}`)
   process.exit(1)
 }
 
+// The identifiers compiled into the module that the patcher renames.
 const IDENTIFIERS = { module: 'token_issuance_template', struct: 'TOKEN_ISSUANCE_TEMPLATE' }
+// The default values of the template's constants, which the patcher overwrites. Every one is distinct from the others on purpose: identical Move constants collapse into ONE
+// constant-pool entry, which could not then be patched independently.
 const DEFAULTS = {
   decimals: 9,
   symbol: 'TEMPLATE_SYMBOL',
@@ -39,12 +57,15 @@ const DEFAULTS = {
   frozenMetadata: false,
 }
 
+// The three artefacts of the template release: the compiled module, how it was built, and the source it was built from.
 const mv = read('bytecode/token_issuance_template.mv')
 const info = JSON.parse(read('bytecode/build-info.json').toString('utf8'))
 const source = read('sources/token_issuance_template.move').toString('utf8')
 
+// The files must be the ones build-info.json describes (a half-updated package would pair new source with old bytecode).
 if (sha(mv) !== info.moduleSha256) fail('bytecode hash differs from build-info.json moduleSha256')
 if (sha(source) !== info.sourceSha256) fail('source hash differs from build-info.json sourceSha256')
+// The first four bytes of any Move module (the magic number): anything else cannot be published.
 if (mv.subarray(0, 4).toString('hex') !== 'a11ceb0b') fail('bytecode is not publishable Move bytecode')
 
 // Source carries the identifiers and the defaults the patcher replaces.
@@ -61,12 +82,14 @@ for (const needle of [
 }
 
 // The module decodes, re-encodes byte for byte, and its constant pool holds each default once.
+// A lossless round trip is what lets the patcher edit the decoded module and write it back.
 const decoded = deserialize(mv)
 if (!Buffer.from(serialize(decoded)).equals(mv)) fail('decode/encode round trip changed the bytecode')
 for (const id of Object.values(IDENTIFIERS)) {
   if (!decoded.identifiers.includes(id)) fail(`identifier ${id} not in the module`)
 }
 // rules.ts lists the identifiers the module uses besides its own; module names must avoid them.
+// The list in rules.ts is plain text; read it back and compare it with what the module really contains (sorted, so the order does not matter).
 const rulesSrc = readFileSync(new URL('../src/rules.ts', import.meta.url), 'utf8')
 const listed = /TEMPLATE_IMPORTED_IDENTIFIERS[^[]*\[([^\]]*)\]/.exec(rulesSrc)
 const listedIds = listed ? [...listed[1].matchAll(/'([^']+)'/g)].map((m) => m[1]).sort() : []
@@ -74,11 +97,13 @@ const actualIds = decoded.identifiers.filter((id) => !Object.values(IDENTIFIERS)
 if (JSON.stringify(listedIds) !== JSON.stringify(actualIds)) {
   fail(`TEMPLATE_IMPORTED_IDENTIFIERS in src/rules.ts must be exactly: ${actualIds.join(', ')}`)
 }
+// The constant pool, and a byte-array comparison. Each default must occur EXACTLY once: zero means the artefact changed, two means the patcher could not tell the slots apart.
 const pool = decoded.constant_pool
 const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i])
 if (pool.filter((c) => c.type_ === 'U8' && same(c.data, [DEFAULTS.decimals])).length !== 1) {
   fail(`U8 constant ${DEFAULTS.decimals} is not in the constant pool exactly once`)
 }
+/** The little-endian bytes of a u64 (how BCS stores it). */
 const u64le = (n) => Array.from({ length: 8 }, (_, i) => Number((BigInt(n) >> BigInt(8 * i)) & 0xffn))
 if (pool.filter((c) => c.type_ === 'U64' && same(c.data, u64le(DEFAULTS.initialSupply))).length !== 1) {
   fail(`U64 constant ${DEFAULTS.initialSupply} is not in the constant pool exactly once`)
@@ -135,6 +160,7 @@ export const TEMPLATE_DEFAULTS = Object.freeze({
 } as const)
 `
 
+// The template's text files, by the name a generated package uses (left) and their path inside the template package (right).
 const FILES = {
   'Move.toml': 'Move.toml',
   'Move.lock': 'Move.lock',
@@ -146,6 +172,7 @@ const FILES = {
   'CLAUDE.md': 'templates/CLAUDE.md',
   'AGENTS.md': 'templates/AGENTS.md',
 }
+// One `"name": "<text>"` line per file, JSON-quoted so the generated TypeScript is valid whatever the text contains.
 const entries = Object.entries(FILES).map(
   ([key, path]) => `  ${JSON.stringify(key)}: ${JSON.stringify(read(path).toString('utf8'))},`,
 )
@@ -159,10 +186,12 @@ ${entries.join('\n')}
 })
 `
 
+// What this script owns: each generated file and its new text.
 const outputs = [
   [join(root, 'src/template/artifact.ts'), artifact],
   [join(root, 'src/template/files.ts'), files],
 ]
+// `--check`: compare, do not write (what CI runs). A missing file counts as stale.
 if (process.argv.includes('--check')) {
   const stale = outputs.filter(([path, text]) => {
     try {
@@ -174,6 +203,7 @@ if (process.argv.includes('--check')) {
   if (stale.length) fail(`${stale.map(([p]) => p.slice(root.length + 1)).join(', ')} differ from @meddleware/token-issuance-template-sui@${version} — run npm run gen:template`)
   console.log(`src/template matches @meddleware/token-issuance-template-sui@${version}.`)
 } else {
+  // The default: write both files.
   for (const [path, text] of outputs) writeFileSync(path, text)
   console.log(`Wrote src/template/artifact.ts and files.ts from @meddleware/token-issuance-template-sui@${version}.`)
 }

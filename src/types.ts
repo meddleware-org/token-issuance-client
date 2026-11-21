@@ -1,4 +1,7 @@
 // Shared types for deploying a coin from @meddleware/token-issuance-template-sui.
+//
+// Role: the vocabulary of the whole package. `TokenConfig` is every choice behind a token (the permanent ones and the changeable ones are marked), `PublishResult` is what a
+// deployment produced, `DeployedToken` is one coin a wallet controls. Types only: no runtime code. Tested indirectly by every module that uses them.
 
 /** A Sui network a token can be deployed to. */
 export type TokenNetwork = 'testnet' | 'mainnet' | 'localnet'
@@ -24,8 +27,11 @@ export interface TokenConfig {
   /** One-time-witness struct name: always the module name uppercased (see `deriveStructName`). */
   structName: string
 
+  /** The ticker, permanent on-chain (e.g. "MYT"). */
   symbol: string
+  /** The display name (changeable by the MetadataCap holder unless metadata is frozen). */
   name: string
+  /** A short description (changeable unless metadata is frozen). */
   description: string
   /** Icon URL (`https://` or `ipfs://`), or '' for none. */
   iconUrl: string
@@ -34,8 +40,11 @@ export interface TokenConfig {
 
   /** Whole-token initial supply minted to the recipient (before decimals scaling); 0 for none. */
   initialSupply: bigint
+  /** Fixed (nobody can mint more) or mintable (the recipient keeps the TreasuryCap). */
   supplyPolicy: SupplyPolicy
+  /** Updatable (the recipient keeps the MetadataCap) or frozen. */
   metadataPolicy: MetadataPolicy
+  /** Immutable (no upgrade is possible) or upgradeable (the recipient keeps the UpgradeCap). */
   packagePolicy: PackagePolicy
 
   /** Address that receives the caps and initial supply; '' means the sender. */
@@ -47,12 +56,15 @@ export interface TokenConfig {
   licenseName?: string
   /** Free text used only in generated docs. */
   packageDescription: string
+  /** The project's name, used only in the generated package's README. */
   projectName: string
 }
 
 /** A successful on-chain publish. */
 export interface PublishResult {
+  /** The network it was published to. */
   network: TokenNetwork
+  /** The new package's id. */
   packageId: string
   /** Full coin type `<packageId>::<module>::<STRUCT>` (normalised). */
   coinType: string
@@ -62,11 +74,14 @@ export interface PublishResult {
   metadataCapId?: string
   /** The initial supply, one `Coin<T>` owned by the publisher until finalize moves it; absent for a zero supply. */
   initialCoinId?: string
+  /** The pending `Currency<T>` object (owned by the registry address until finalized). */
   currencyId?: string
   /** Version and digest of the pending `Currency<T>` — needed for `finalize_registration`. */
   currencyVersion?: string
   currencyDigest?: string
+  /** The UpgradeCap, present only for an `upgradeable` package. */
   upgradeCapId?: string
+  /** The publish transaction's digest. */
   digest: string
   /** Where the platform fee was sent, and how much (MIST). */
   feeRecipient: string
@@ -93,22 +108,33 @@ export interface DeployedToken {
 
 /** The reads {@link listMyTokens} makes on a core Sui client (e.g. `SuiGrpcClient`). */
 export interface OwnedObjectsClient {
+  /** The SDK's unified core API (only the four calls this package makes). */
   core: {
+    /** One page of the objects an address owns, optionally of one Move type. */
     listOwnedObjects(options: {
+      /** The owner's address. */
       owner: string
+      /** Only objects of this Move type. */
       type?: string
+      /** Where the previous page ended. */
       cursor?: string | null
+      /** The page size. */
       limit?: number
     }): Promise<{ objects: { objectId: string; type: string }[]; hasNextPage: boolean; cursor: string | null }>
+    /** One page of the coin balances an address holds. */
     listBalances(options: {
+      /** The holder's address. */
       owner: string
+      /** Where the previous page ended. */
       cursor?: string | null
+      /** The page size. */
       limit?: number
     }): Promise<{ balances: { coinType: string }[]; hasNextPage: boolean; cursor: string | null }>
     /** Reads a package object, whose `previousTransaction` is the transaction that published it. */
     getObject(options: { objectId: string; include?: { previousTransaction?: boolean } }): Promise<{
       object: { previousTransaction?: string | null }
     }>
+    /** A transaction by digest, optionally with its sender. */
     getTransaction(options: { digest: string; include?: { transaction?: boolean } }): Promise<{
       Transaction?: { transaction?: { sender?: string } | null }
       FailedTransaction?: { transaction?: { sender?: string } | null }

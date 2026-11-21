@@ -83,6 +83,34 @@ exact `@meddleware/token-issuance-template-sui` devDependency and run `npm run g
 
 Release: bump `version`, push, tag `v<version>`; `npm-publish.yml` publishes via npm trusted publishing. Licence: 0BSD.
 
+## Commands
+
+```bash
+npm ci && npm run type-check && npm run lint && npm test && npm run build   # the core of what the `check` CI job runs
+npm run check:template                                                      # src/template/ matches the pinned template package (npm run gen:template rewrites it)
+npm audit --audit-level=high                                                # the dependency check (this repo does not use mw-audit-gate)
+npm run test:integration                                                    # live read-only suite against public testnet and mainnet; CI runs it weekly (live.yml)
+npm run e2e:localnet                                                        # real-chain end to end on a local network; needs `sui`; CI runs it nightly (localnet.yml)
+```
+
+## Gotchas
+
+- **The localnet e2e is a release gate.** `npm-publish.yml`'s `localnet-gate` blocks a tag while the newest "Localnet e2e" run on main is red, missing or older than 72 h; the nightly run has
+  passed every night checked (2026-11-19 to 11-21). `.github/localnet-gate.mjs` is tested in `tests/localnet-gate.test.ts`.
+- **`src/template/artifact.ts` and `files.ts` are generated.** Edit `scripts/gen-template.mjs` (a comment inside a template literal there changes the generated files, and a backtick in
+  one ends the literal), never the generated files; `check:template` fails on drift.
+- **`scripts/ts-resolve.mjs` holds JavaScript inside a template literal** (the loader hook is passed as a data: module). Do not put a backtick in a comment there: it ends the string.
+- **Patching changes permanent facts.** The names, symbol, decimals, supply and policies a person chooses cannot be changed after publish; the patcher and the rules refuse anything that
+  would break the bytecode, and the patcher re-decodes its own output to confirm the values (`src/template/patch.ts`). Keep both checks when changing either.
+- **The localnet end to end needs the `sui` CLI and spends nothing real**; it refuses a public chain identifier unless `E2E_ALLOW_PUBLIC=1`.
+- **There is no `mw-audit-gate`.** This repository does not depend on `@meddleware/frontend-config`; CI runs `npm audit --audit-level=high`.
+
+## Related
+
+- The audit: [`docs/audit/token-issuance-client-audit.md`](docs/audit/token-issuance-client-audit.md).
+- How to propose a change: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- Consumers (both at `^0.0.16`): `token-issuance-ui` and `dev-site`; release them after this package. The Move template this package patches: `token-issuance-template-sui`.
+
 ## Testing
 
 `npm test` (vitest, 156 tests): rules, type matching (look-alike packages, nested generics, long-form

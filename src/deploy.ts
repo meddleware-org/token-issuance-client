@@ -1,5 +1,9 @@
 // @meddleware/token-issuance-client/deploy — patch → publish → confirm → finalize → result, decoupled
 // from any wallet through an `Executor`.
+//
+// Role: the one orchestrator of a deployment, and the place that decides what a person is told when something fails half way. The coin exists on-chain from the moment the publish executes, so
+// every later failure is reported as such (with what remains to do) and never invites a second deploy, which would publish a second coin and charge the fee again.
+// Main exports: `deployToken`, `finalizeToken`, `Executor`, and the three error classes. Tested in `tests/deploy.test.ts`.
 
 import type { Transaction } from '@mysten/sui/transactions'
 import { assertResultMatchesPolicy, extractPublishResult, type SuiTxResult } from './results.js'
@@ -16,21 +20,32 @@ export interface Executor {
   waitForTransaction(digest: string): Promise<void>
 }
 
+/** The phases of a deployment, in order, for a progress display. */
 export type DeployStep = 'patching' | 'publishing' | 'confirming' | 'finalizing' | 'confirming-finalize' | 'done'
 
+/** What `deployToken` needs. */
 export interface DeployArgs {
+  /** The token's choices (validated by the patcher before anything is signed). */
   config: TokenConfig
+  /** The network being deployed to. */
   network: TokenNetwork
+  /** The deployer's address. */
   sender: string
+  /** The platform fee in MIST. */
   feeMist: bigint
+  /** Where the fee goes (a full, non-zero address; checked by the publish builder). */
   feeTreasury: string
+  /** The gas budget in MIST for each transaction. */
   gasBudget: bigint
+  /** Signs and runs the transactions. */
   executor: Executor
+  /** Called as each phase starts. */
   onStep?: (step: DeployStep) => void
 }
 
 /** Only an explicit `success` status counts; a missing status is a failure, never a success. */
 function assertSuccess(res: SuiTxResult, what: string): void {
+  // Anything but an explicit success is a failure, including a result with no status at all.
   const status = res.effects?.status?.status
   if (status !== 'success') {
     throw new Error(`${what} failed: ${res.effects?.status?.error ?? status ?? 'no effects status returned'}`)
@@ -45,7 +60,9 @@ export interface PendingFinalize {
   result: PublishResult
   /** The pending `Currency<T>`'s reference from the publish effects. */
   currencyRef?: CurrencyRef
+  /** The deployer, who still owns what `init` created. */
   sender: string
+  /** The gas budget for the finalize transaction. */
   gasBudget: bigint
 }
 
@@ -55,8 +72,10 @@ export interface PendingFinalize {
  * `publishDigest` identifies the publish. Subclasses say what remains to do.
  */
 export class PublishedError extends Error {
+  /** The publish transaction's digest, so the person (or support) can find the coin. */
   readonly publishDigest: string
 
+  /** @param message - what happened and what remains; @param publishDigest - the executed publish; @param cause - the underlying error */
   constructor(message: string, publishDigest: string, cause?: unknown) {
     super(message, { cause })
     this.name = 'PublishedError'
@@ -71,8 +90,10 @@ export class PublishedError extends Error {
  * what `init` created stays with the sender (the policies themselves were already applied by `init`).
  */
 export class DeployIncompleteError extends PublishedError {
+  /** Everything `finalizeToken` needs to finish the setup. */
   readonly pending: PendingFinalize
 
+  /** @param pending - the unfinished deployment; @param cause - why the setup did not complete */
   constructor(pending: PendingFinalize, cause: unknown) {
     const reason = cause instanceof Error ? cause.message : String(cause)
     super(`Published ${pending.result.coinType}, but finishing its setup failed: ${reason}`, pending.result.digest, cause)
@@ -86,9 +107,12 @@ export class DeployIncompleteError extends PublishedError {
  * out). The coin is fully set up; do **not** retry — `result` is the deploy's outcome.
  */
 export class DeployUnconfirmedError extends PublishedError {
+  /** The completed deployment's outcome. */
   readonly result: PublishResult
+  /** The finalize transaction's digest. */
   readonly digest: string
 
+  /** @param result - the outcome; @param digest - the executed finalize; @param cause - why confirmation failed */
   constructor(result: PublishResult, digest: string, cause: unknown) {
     const reason = cause instanceof Error ? cause.message : String(cause)
     super(`Finalized ${result.coinType} (transaction ${digest}), but confirmation failed: ${reason}`, result.digest, cause)
@@ -114,10 +138,12 @@ export async function finalizeToken(args: {
   executor: Executor
   onStep?: (step: DeployStep) => void
 }): Promise<PublishResult> {
+  // Nothing to register or move (no currency reference and the recipient is the sender): the deployment is already complete.
   if (!finalizeHasWork(args.pending)) {
     args.onStep?.('done')
     return args.pending.result
   }
+  // Two parts, so a failure to CONFIRM is told apart from a failure to EXECUTE: the first must not be retried, the second may be.
   const digest = await executeFinalize(args)
   return confirmFinalize(args, digest)
 }
@@ -130,6 +156,7 @@ async function executeFinalize(args: {
 }): Promise<string> {
   const { pending, executor, onStep } = args
   const { result } = pending
+  // The second wallet approval.
   onStep?.('finalizing')
   const fin = await executor.signAndExecute(
     buildFinalizeTransaction({
@@ -143,6 +170,7 @@ async function executeFinalize(args: {
       gasBudget: pending.gasBudget,
     }),
   )
+  // A transaction that ran but failed on-chain is an error (and retryable: nothing changed).
   assertSuccess(fin, 'Finalize')
   return fin.digest
 }
@@ -153,6 +181,7 @@ async function confirmFinalize(
   digest: string,
 ): Promise<PublishResult> {
   args.onStep?.('confirming-finalize')
+  // The transaction already succeeded; if only the wait fails (an indexing timeout), say the setup is on-chain and not to retry.
   try {
     await args.executor.waitForTransaction(digest)
   } catch (e) {
@@ -178,11 +207,14 @@ async function confirmFinalize(
  */
 export async function deployToken(args: DeployArgs): Promise<PublishResult> {
   const { executor, onStep } = args
+  // The struct name is always derived from the module name, so a caller cannot pass one that breaks the one-time-witness rule.
   const config: TokenConfig = { ...args.config, structName: deriveStructName(args.config.moduleName) }
 
+  // The patcher validates the whole configuration before any bytecode is produced.
   onStep?.('patching')
   const moduleBytes = await patchTokenModule(config)
 
+  // The first wallet approval: publish, the fee and the package policy in one transaction.
   onStep?.('publishing')
   const pub = await executor.signAndExecute(
     buildPublishTransaction({
@@ -195,6 +227,7 @@ export async function deployToken(args: DeployArgs): Promise<PublishResult> {
       recipient: config.recipient || args.sender,
     }),
   )
+  // Before the publish has executed nothing exists, so a failure here is a plain error and a fresh deploy is safe.
   assertSuccess(pub, 'Publish')
   // The publish executed: from here on the coin exists, so every failure must say so (and how to
   // finish) rather than invite a second deploy.
@@ -211,6 +244,7 @@ export async function deployToken(args: DeployArgs): Promise<PublishResult> {
     throw new PublishedError(`Published (transaction ${pub.digest}), but its effects could not be read: ${reason}`, pub.digest, e)
   }
   const { result, currencyRef } = parsed
+  // The patched constants must have produced the policies the person chose; if not, stop before routing caps that should not exist.
   try {
     assertResultMatchesPolicy(config, result)
   } catch (e) {
@@ -226,6 +260,7 @@ export async function deployToken(args: DeployArgs): Promise<PublishResult> {
     sender: args.sender,
     gasBudget: args.gasBudget,
   }
+  // Wait until the publish is indexed, so the objects finalize moves can be read; a failure here leaves the coin published but unfinished.
   onStep?.('confirming')
   try {
     await executor.waitForTransaction(pub.digest)
@@ -243,4 +278,5 @@ export async function deployToken(args: DeployArgs): Promise<PublishResult> {
   return confirmFinalize({ pending, executor, onStep }, digest)
 }
 
+// Re-exported so an executor can be built from this entry alone.
 export { toSuiTxResult, type CoreExecutionResult, type SuiTxResult } from './results.js'

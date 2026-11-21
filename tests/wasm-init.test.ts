@@ -1,3 +1,7 @@
+/**
+ * Tests for the WASM loader (`src/template/patch.ts`): the configured source is passed to the SDK's `init`, loading happens once however often it is requested, and a failure is rethrown and
+ * retried on the next call (a misconfigured asset must surface at set-up and be fixable, not poison every later patch).
+ */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // The browser build's `init` is mocked so the loader contract can be checked under Node.

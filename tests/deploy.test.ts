@@ -1,3 +1,8 @@
+/**
+ * Tests for the deployment orchestrator (`src/deploy.ts`) and the result mapper (`src/results.ts`): the order and arguments of the two transactions, what is refused before anything is
+ * signed, and above all what a person is told when a step fails after the coin exists (an incomplete deploy offers a finish, an unconfirmed one says not to retry, and nothing invites a
+ * second deploy). The wallet is an executor double and the objects a publish creates are fixtures.
+ */
 import { describe, it, expect, vi } from 'vitest'
 import {
   DeployIncompleteError,
@@ -11,9 +16,11 @@ import type { CoreExecutionResult, Executor, SuiTxResult } from '../src/deploy.j
 import { extractPublishResult } from '../src/index.js'
 import type { TokenConfig } from '../src/types.js'
 
+// The deployer and the fee treasury (placeholder addresses).
 const sender = '0x' + '1'.repeat(64)
 const treasury = '0x' + '2'.repeat(64)
 
+/** A valid token configuration (mintable, updatable, immutable package) with `over` applied. */
 function baseConfig(over: Partial<TokenConfig> = {}): TokenConfig {
   return {
     packageName: 'my_token', moduleName: 'mytoken', structName: 'IGNORED',
@@ -24,6 +31,7 @@ function baseConfig(over: Partial<TokenConfig> = {}): TokenConfig {
   }
 }
 
+// The published package and the coin type of the fixtures.
 const PKG = '0x' + 'a1'.repeat(32)
 const COIN = `${PKG}::mytoken::MYTOKEN`
 
@@ -43,8 +51,10 @@ const publishChanges = (
   { type: 'created', objectType: `0x2::coin_registry::Currency<${coinType}>`, objectId: '0xC', version: '1', digest: 'CURRENCYDIGEST' },
 ]
 
+/** The signing method's type, so a spy can be typed exactly. */
 type SignAndExecute = Executor['signAndExecute']
 
+/** An executor double: every transaction "succeeds" with the given object changes (a normal publish by default); `overrides` replaces a method to simulate a failure. */
 function mockExecutor(overrides: Partial<Executor> = {}, changes = publishChanges(COIN)): Executor {
   return {
     signAndExecute: vi.fn<SignAndExecute>(async () => ({
@@ -57,6 +67,7 @@ function mockExecutor(overrides: Partial<Executor> = {}, changes = publishChange
   }
 }
 
+// The happy paths and the refusals that must happen before anything is signed.
 describe('deployToken', () => {
   it('always runs a finalize tx (for coin_registry::finalize_registration); struct name is derived', async () => {
     const exec = mockExecutor()
@@ -73,6 +84,7 @@ describe('deployToken', () => {
     expect(steps).toEqual(['patching', 'publishing', 'confirming', 'finalizing', 'confirming-finalize', 'done'])
   })
 
+  // The initial supply is one Coin the publisher owns until finalize moves it; finalize must be given its id.
   it('reads the initial supply Coin out of the publish and finalizes with it', async () => {
     const exec = mockExecutor({}, publishChanges(COIN, { coin: true }))
     const steps: string[] = []
@@ -97,6 +109,7 @@ describe('deployToken', () => {
     expect(result.initialCoinId).toBe('0xK')
   })
 
+  // The framework would abort the publish after the person has signed and paid; the patcher refuses first.
   it('refuses a fixed supply with nothing to mint before signing anything', async () => {
     const exec = mockExecutor()
     await expect(
@@ -108,6 +121,7 @@ describe('deployToken', () => {
     expect(exec.signAndExecute).not.toHaveBeenCalled()
   })
 
+  // The patched constants must have produced the chosen policies; if the chain says otherwise the coin exists, so the error says "published" and carries the digest.
   it('reports a publish whose objects contradict the chosen policy as published, with the digest', async () => {
     // A fixed supply must leave no TreasuryCap: if one exists the patched constants did not do what was asked.
     const exec = mockExecutor({}, publishChanges(COIN, { treasury: true, metadata: false, coin: true }))
@@ -120,6 +134,7 @@ describe('deployToken', () => {
     expect(exec.signAndExecute).toHaveBeenCalledTimes(1) // never routed anything
   })
 
+  // The rules run before the patcher and the wallet, so an invalid token never costs a prompt.
   it('refuses an invalid config before patching or signing', async () => {
     const exec = mockExecutor()
     await expect(
@@ -131,6 +146,7 @@ describe('deployToken', () => {
     expect(exec.signAndExecute).not.toHaveBeenCalled()
   })
 
+  // The pending Currency's id, version and digest come from the publish effects; a stale reference would make finalize fail.
   it('passes the currency reference to finalize_registration', async () => {
     const exec = mockExecutor()
     await deployToken({
@@ -155,6 +171,7 @@ describe('deployToken', () => {
     ).rejects.toThrow(/InsufficientGas/)
   })
 
+  // A result that says nothing about its outcome must not be assumed to have worked.
   it('treats a result without an effects status as a failure (never as success)', async () => {
     const exec = mockExecutor({
       signAndExecute: vi.fn<SignAndExecute>(async () => ({ digest: '0xD', objectChanges: [] })),
@@ -168,6 +185,7 @@ describe('deployToken', () => {
   })
 })
 
+// After the publish executes the coin exists, so every failure must say so and offer a way to finish, never a second deploy (which would publish another coin and charge the fee again).
 describe('deployToken — interrupted between publish and finalize', () => {
   const okPublish = { digest: '0xPUB', objectChanges: publishChanges(COIN), effects: { status: { status: 'success' } } }
   // A fixed supply with an initial coin: no TreasuryCap.
@@ -207,6 +225,7 @@ describe('deployToken — interrupted between publish and finalize', () => {
     ).rejects.toBeInstanceOf(DeployIncompleteError)
   })
 
+  // The recovery path the error offers: one more wallet approval completes the setup, with the same coin and no second publish.
   it('finalizeToken finishes a pending deploy with one more signature', async () => {
     const first = mockExecutor({
       signAndExecute: vi.fn<SignAndExecute>().mockResolvedValueOnce(fixedPublish).mockRejectedValueOnce(new Error('rejected')),
@@ -255,6 +274,7 @@ describe('deployToken — interrupted between publish and finalize', () => {
     expect(steps).toEqual(['done'])
   })
 
+  // The coin is fully set up; a retry would fail on-chain at best, and mislead the person at worst.
   it('does not invite a retry when the finalize executed but its confirmation failed', async () => {
     const exec = mockExecutor({
       waitForTransaction: vi
@@ -295,6 +315,7 @@ describe('deployToken — interrupted between publish and finalize', () => {
     expect((err as PublishedError).publishDigest).toBe('0xPUB')
   })
 
+  // Before the publish executes nothing exists, so the plain error is right and a fresh deploy is safe.
   it('does not wrap a publish failure (nothing was published)', async () => {
     const exec = mockExecutor({ signAndExecute: vi.fn<SignAndExecute>().mockRejectedValueOnce(new Error('rejected')) })
     const err = await deployToken({
@@ -304,8 +325,10 @@ describe('deployToken — interrupted between publish and finalize', () => {
   })
 })
 
+// The mapping from the gRPC client's result shape to this package's; the fixtures mimic what a real node returns.
 describe('toSuiTxResult (gRPC core execution → SuiTxResult)', () => {
   const coinType = COIN
+  /** A changed-object entry in the client's shape. */
   const written = (objectId: string, idOperation: 'Created' | 'None', version: string) => ({
     objectId,
     inputState: 'Unknown',
@@ -318,6 +341,7 @@ describe('toSuiTxResult (gRPC core execution → SuiTxResult)', () => {
     outputOwner: null,
     idOperation,
   })
+  /** A whole transaction result: one package, a TreasuryCap, a Currency and a gas coin; it succeeded or failed with a Move abort. */
   const tx = (success: boolean) => ({
     digest: 'TXDIGEST',
     status: success ? { success: true, error: null } : { success: false, error: { message: 'MoveAbort(7)' } },
@@ -365,6 +389,7 @@ describe('toSuiTxResult (gRPC core execution → SuiTxResult)', () => {
     })
   })
 
+  // `Object.hasOwn` in the mapper: a plain lookup would find `constructor` on the prototype chain.
   it('reads object types by own key only (an object id like `constructor` gets no inherited value)', () => {
     const t = tx(true)
     t.effects.changedObjects = [written('constructor', 'None', '5')]

@@ -121,12 +121,22 @@ built the module.
 
 ## Development
 
+The package ships its TypeScript source plus a declaration-only build. The checks, all run in CI on every push (`.github/workflows/node-ci.yml`; the tests also run on Node 24, the
+minimum in `engines`):
+
 ```bash
-npm test               # unit tests
-npm run test:integration  # ABI drift + chain ids against public testnet and mainnet
-npm run e2e:localnet   # real deploy on `sui start --with-faucet --force-regenesis` (CI: nightly, a release gate)
-npm run check:template # artefact matches the pinned template
+npm ci                    # install exactly the lockfile
+npm run type-check        # tsc over src/ and tests/
+npm run lint              # eslint (typescript-eslint recommended)
+npm test                  # 156 offline unit tests (the chain and the wallet are doubles; the WASM and the compiled template are real)
+npm run check:template    # src/template/ matches the pinned @meddleware/token-issuance-template-sui
+npm run build             # the .d.ts files in dist/
+npm audit --audit-level=high   # the dependency check
+npm run test:integration  # ABI drift + chain ids against public testnet and mainnet (read-only, no key; CI runs it weekly)
+npm run e2e:localnet      # real deploy on `sui start --with-faucet --force-regenesis` (needs the sui CLI; CI: nightly, a release gate)
 ```
+
+How to propose a change: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

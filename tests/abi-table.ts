@@ -30,11 +30,17 @@ export const BUILDERS: Record<string, () => Transaction[]> = {
   buildFinalizeTransaction: () => [finalize({}), finalize({ supplyPolicy: 'mintable', metadataPolicy: 'updatable', initialSupply: 0n })],
 }
 
+/** One Move call in a transaction, reduced to what the ABI check compares. */
 export interface MoveCallShape {
+  /** The package id the call targets. */
   package: string
+  /** The module. */
   module: string
+  /** The function. */
   function: string
+  /** How many type arguments the call carries. */
   typeArguments: number
+  /** How many arguments the call carries. */
   arguments: number
 }
 

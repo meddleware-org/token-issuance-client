@@ -10,20 +10,33 @@
 //      (the initial supply, the TreasuryCap unless the supply is fixed, the MetadataCap unless the
 //      metadata is frozen) to the recipient. The supply and metadata policies are applied by `init`
 //      itself, in the publish transaction, so they are recorded in the coin registry.
+//
+// Role: the only code that builds the transactions a person signs to launch a coin. Everything the chain would refuse after the person has paid gas (a zero or truncated fee recipient,
+// object ids that cannot exist under the chosen policies) is refused here first. Main exports: `buildPublishTransaction`, `buildFinalizeTransaction`, `finalizeHasWork`. Tested in
+// `tests/transactions.test.ts`; the real chain is exercised by the localnet end-to-end script.
 
 import { Transaction } from '@mysten/sui/transactions'
 import { normalizeSuiAddress, toBase64 } from '@mysten/sui/utils'
 import type { TokenConfig } from './types.js'
 
+/** The Sui framework package. */
 const SUI_FRAMEWORK = '0x2'
+/** The Move standard library package. */
 const MOVE_STDLIB = '0x1'
 
+/** What `buildPublishTransaction` needs. */
 export interface BuildPublishArgs {
+  /** The patched, compiled module to publish. */
   moduleBytes: Uint8Array
+  /** The deployer (also the gas payer). */
   sender: string
+  /** The platform fee in MIST (0 for none). */
   feeMist: bigint
+  /** Where the fee is sent (a full, non-zero address; checked). */
   feeRecipient: string
+  /** The gas budget in MIST. */
   gasBudget: bigint
+  /** Immutable (the UpgradeCap is destroyed) or upgradeable (it is sent to the recipient). */
   packagePolicy: TokenConfig['packagePolicy']
   /**
    * Receives the UpgradeCap of an `upgradeable` package (default: the sender). The recipient is who
@@ -37,12 +50,14 @@ export function buildPublishTransaction(args: BuildPublishArgs): Transaction {
   const tx = new Transaction()
   tx.setSender(args.sender)
 
+  // Publish returns the UpgradeCap; the package depends on the Move standard library and the Sui framework.
   const [upgradeCap] = tx.publish({
     modules: [toBase64(args.moduleBytes)],
     dependencies: [MOVE_STDLIB, SUI_FRAMEWORK],
   })
   if (!upgradeCap) throw new Error('publish returned no UpgradeCap')
 
+  // Immutable: destroy the cap in the same transaction, so there is no moment when the package could be upgraded. Upgradeable: the cap goes to the recipient, with the coin's other caps.
   if (args.packagePolicy === 'immutable') {
     tx.moveCall({ target: `${SUI_FRAMEWORK}::package::make_immutable`, arguments: [upgradeCap] })
   } else {
@@ -54,24 +69,32 @@ export function buildPublishTransaction(args: BuildPublishArgs): Transaction {
     if (!/^0x[0-9a-fA-F]{64}$/.test(args.feeRecipient) || /^0x0+$/.test(args.feeRecipient)) {
       throw new Error('Invalid fee recipient: expected a full, non-zero address (0x followed by 64 hex digits).')
     }
+    // The fee is split from the gas coin (no separate coin object is needed) and sent to the platform.
     const [fee] = tx.splitCoins(tx.gas, [args.feeMist])
     if (!fee) throw new Error('splitCoins returned no coin')
     tx.transferObjects([fee], args.feeRecipient)
   }
 
+  // An explicit budget, so the wallet shows a cost the person can see before signing.
   tx.setGasBudget(args.gasBudget)
   return tx
 }
 
 /** Full reference of the pending `Currency<T>` (owned by the registry address `0xc`). */
 export interface CurrencyRef {
+  /** The pending Currency object's id. */
   objectId: string
+  /** Its version (a receiving reference needs the exact version). */
   version: string
+  /** Its digest. */
   digest: string
 }
 
+/** What `buildFinalizeTransaction` needs. */
 export interface BuildFinalizeArgs {
+  /** The token's choices (the recipient and the policies decide what is moved). */
   config: TokenConfig
+  /** The full coin type `<package>::<module>::<STRUCT>`. */
   coinType: string
   /** The TreasuryCap `init` handed to the sender: present exactly when the supply is mintable. */
   treasuryCapId?: string
@@ -84,7 +107,9 @@ export interface BuildFinalizeArgs {
    * discoverable object so wallets read the coin's decimals.
    */
   currencyRef?: CurrencyRef
+  /** The deployer, who owns the objects `init` created. */
   sender: string
+  /** The gas budget in MIST. */
   gasBudget: bigint
 }
 
@@ -97,6 +122,7 @@ const sameAddress = (a: string, b: string) => normalizeSuiAddress(a) === normali
  * the recipient is the sender), in which case there is no transaction to run.
  */
 export function finalizeHasWork(args: Pick<BuildFinalizeArgs, 'config' | 'currencyRef' | 'sender'>): boolean {
+  // An empty recipient means the sender.
   const recipient = args.config.recipient || args.sender
   return Boolean(args.currencyRef) || !sameAddress(recipient, args.sender)
 }
@@ -111,11 +137,13 @@ export function finalizeHasWork(args: Pick<BuildFinalizeArgs, 'config' | 'curren
  */
 export function buildFinalizeTransaction(args: BuildFinalizeArgs): Transaction {
   const { config, coinType } = args
+  // Refuse a wiring mistake before building anything.
   assertObjectsMatchPolicy(args)
   const tx = new Transaction()
   tx.setSender(args.sender)
   const recipient = config.recipient || args.sender
 
+  // First, promote the pending Currency to a shared object so wallets can read the coin's decimals; `0xc` is the coin registry.
   if (args.currencyRef) {
     tx.moveCall({
       target: `${SUI_FRAMEWORK}::coin_registry::finalize_registration`,
@@ -124,6 +152,7 @@ export function buildFinalizeTransaction(args: BuildFinalizeArgs): Transaction {
     })
   }
 
+  // Then hand whatever `init` left with the sender to the recipient (nothing, when they are the same account).
   const held = [args.initialCoinId, args.treasuryCapId, args.metadataCapId].filter((id): id is string => Boolean(id))
   if (!sameAddress(recipient, args.sender) && held.length > 0) {
     tx.transferObjects(held.map((id) => tx.object(id)), recipient)
@@ -136,6 +165,7 @@ export function buildFinalizeTransaction(args: BuildFinalizeArgs): Transaction {
 /** Refuse object ids that cannot exist under the chosen policies (a caller wiring the wrong result). */
 function assertObjectsMatchPolicy(args: BuildFinalizeArgs): void {
   const { config } = args
+  // Each line pairs a policy with the object that must (or must not) exist under it, in both directions.
   if (config.supplyPolicy === 'fixed' && args.treasuryCapId) {
     throw new Error('A fixed supply has no TreasuryCap: init handed it to the coin registry.')
   }

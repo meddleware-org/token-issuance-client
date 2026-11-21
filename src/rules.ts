@@ -1,13 +1,19 @@
 // Move and metadata rules for a token. The form layer of an app shows these as messages; the
 // generators and the patcher call `assertTokenConfig` so an unvalidated config can never produce
 // malformed Move source or bytecode.
+//
+// Role: one list of rules for a token's text, names, numbers and policies. Each rule exists because breaking it has a cost the person only meets after paying: Move source that does not
+// compile, bytecode that fails verification on-chain, or a coin whose name can never be changed. The validators return a message (for a form) and `assertTokenConfig` throws on the first
+// failure (for the generators). Main exports: `assertTokenConfig`, `validateIdentifier`, `validateModuleName`, `validatePackageName`, `parseSupply`, `TOKEN_LIMITS`. Tested in `tests/rules.test.ts`.
 
 import type { TokenConfig } from './types.js'
 
 /** Largest amount `coin::mint` accepts (u64). */
 export const MAX_U64 = 18_446_744_073_709_551_615n
 
-/** Bounds every app and generator applies (bytes = characters: the allowed text is ASCII). */
+/**
+ * Bounds every app and generator applies (bytes = characters: the allowed text is ASCII). Frozen, so a consumer cannot change the limits every other consumer applies.
+ */
 export const TOKEN_LIMITS = Object.freeze({
   identifier: 64,
   symbol: 32,
@@ -19,11 +25,13 @@ export const TOKEN_LIMITS = Object.freeze({
   licenseName: 64,
   /** The full licence text written to LICENSE (the longest common licences are well under this). */
   licenseText: 100_000,
+  // The decimals range: 0 to 18 (Sui's coin metadata stores a u8; 18 is the widest convention).
   decimals: Object.freeze({ min: 0, max: 18 }),
 })
 
 /** Sui OTW rule: the witness struct is the module name, uppercased. */
 export function deriveStructName(moduleName: string): string {
+  // Sui's one-time-witness rule: the struct that proves a module's `init` is the module's own name in capitals.
   return moduleName.toUpperCase()
 }
 
@@ -36,9 +44,11 @@ export const MOVE_IDENT = /^[a-z][a-z0-9_]*$/
  */
 export const SAFE_TEXT = /^[\x20-\x21\x23-\x5b\x5d-\x7e]*$/
 
+/** A full Sui address: `0x` and exactly 64 hex digits (a truncated paste would be zero-padded into a different address). */
 const SUI_ADDRESS = /^0x[0-9a-fA-F]{64}$/
 
 /** SPDX-safe licence identifier characters. */
+/** The characters an SPDX licence identifier may contain (it is written into the generated package, so nothing else is allowed). */
 const LICENSE_ID = /^[A-Za-z0-9.\-+]*$/
 
 /**
@@ -49,6 +59,7 @@ export const ICON_URL_ALLOWED_SCHEMES = ['https://', 'ipfs://'] as const
 
 /** True if `url` begins with an allowed icon scheme (case-insensitive). */
 export function hasAllowedIconScheme(url: string): boolean {
+  // Trimmed and lower-cased: `HTTPS://` is the same scheme, and a leading space must not hide a bad one.
   const u = url.trim().toLowerCase()
   return ICON_URL_ALLOWED_SCHEMES.some((s) => u.startsWith(s))
 }
@@ -63,6 +74,7 @@ export const MOVE_RESERVED_WORDS: ReadonlySet<string> = new Set([
 
 /** Validate one Move identifier; returns a message or null. */
 export function validateIdentifier(value: string): string | null {
+  // The checks run in the order a person would fix them: empty, too long, wrong first character, wrong characters, reserved word.
   if (!value) return 'Required'
   if (value.length > TOKEN_LIMITS.identifier) return `${TOKEN_LIMITS.identifier} characters maximum`
   if (!/^[a-z]/.test(value)) return 'Must start with a lowercase letter'
@@ -93,6 +105,7 @@ export const FRAMEWORK_ADDRESS_NAMES: ReadonlySet<string> = new Set(['std', 'sui
 export function validateModuleName(value: string): string | null {
   const err = validateIdentifier(value)
   if (err) return err
+  // A module named like something the template already uses would fail bytecode verification on-chain, after the person has paid gas.
   if (TEMPLATE_IMPORTED_IDENTIFIERS.has(value)) return `"${value}" is already used by the coin module`
   return null
 }
@@ -101,6 +114,7 @@ export function validateModuleName(value: string): string | null {
 export function validatePackageName(value: string): string | null {
   const err = validateIdentifier(value)
   if (err) return err
+  // A package named like a framework address would not build from the downloadable source.
   if (FRAMEWORK_ADDRESS_NAMES.has(value)) return `"${value}" is a Sui framework address name`
   return null
 }
@@ -108,7 +122,9 @@ export function validatePackageName(value: string): string | null {
 /** Parse a whole-token supply ('' = 0) into a non-negative bigint, or null if invalid. */
 export function parseSupply(input: string): bigint | null {
   const s = input.trim()
+  // An empty field means no initial supply.
   if (s === '') return 0n
+  // Digits only: no sign, no decimal point, no exponent (a whole-token count).
   if (!/^\d+$/.test(s)) return null
   return BigInt(s)
 }
@@ -125,6 +141,7 @@ export function isValidDecimals(decimals: number): boolean {
  * @throws {Error} naming the first invalid field.
  */
 export function assertTokenConfig(config: TokenConfig): void {
+  // The names first, then the free text, then the numbers and policies, then the licence: the first failure is the one reported.
   const packageErr = validatePackageName(config.packageName)
   if (packageErr) throw new Error(`Invalid package name: ${packageErr}`)
   const moduleErr = validateModuleName(config.moduleName)
@@ -132,6 +149,7 @@ export function assertTokenConfig(config: TokenConfig): void {
   if (config.structName !== deriveStructName(config.moduleName)) {
     throw new Error('Invalid struct name: must be the module name uppercased.')
   }
+  // Each text field has a label for the message, a maximum length and whether it is required.
   for (const [label, value, max, required] of [
     ['symbol', config.symbol, TOKEN_LIMITS.symbol, true],
     ['name', config.name, TOKEN_LIMITS.name, true],
@@ -145,12 +163,14 @@ export function assertTokenConfig(config: TokenConfig): void {
     if (value.length > max) throw new Error(`Invalid ${label}: ${max} characters maximum.`)
     if (!SAFE_TEXT.test(value)) throw new Error(`Invalid ${label}: contains quotes, backslashes or control characters.`)
   }
+  // An icon is optional, but when given it must be https or ipfs: a `javascript:` or `data:` URL must never reach the coin's metadata.
   if (config.iconUrl && !hasAllowedIconScheme(config.iconUrl)) {
     throw new Error('Invalid icon URL: only https:// or ipfs:// URLs are allowed.')
   }
   if (!isValidDecimals(config.decimals)) {
     throw new Error(`Invalid decimals: expected a whole number between ${TOKEN_LIMITS.decimals.min} and ${TOKEN_LIMITS.decimals.max}.`)
   }
+  // The minted amount is the whole-token supply scaled by the decimals, and must fit a u64 (the limit of `coin::mint`).
   if (config.initialSupply < 0n || config.initialSupply * 10n ** BigInt(config.decimals) > MAX_U64) {
     throw new Error('Invalid initial supply: exceeds the maximum for this decimal precision.')
   }
@@ -159,9 +179,11 @@ export function assertTokenConfig(config: TokenConfig): void {
   if (config.supplyPolicy === 'fixed' && config.initialSupply === 0n) {
     throw new Error('Invalid supply policy: a fixed supply needs an initial supply above zero.')
   }
+  // An empty recipient means the sender; a given one must be a full address.
   if (config.recipient && !SUI_ADDRESS.test(config.recipient)) {
     throw new Error('Invalid recipient: expected 0x followed by 64 hex digits.')
   }
+  // The licence id and its optional display name end up in the generated package.
   if (!LICENSE_ID.test(config.license)) throw new Error('Invalid license identifier.')
   if (config.licenseName !== undefined) {
     if (config.licenseName.length > TOKEN_LIMITS.licenseName) {
@@ -178,6 +200,8 @@ export function assertTokenConfig(config: TokenConfig): void {
  * @throws {Error} if the text is too long or contains a NUL.
  */
 export function assertLicenseText(text: string): void {
+  // A bound, so a hostile or accidental megabyte of text does not become a megabyte file.
   if (text.length > TOKEN_LIMITS.licenseText) throw new Error(`Invalid license text: ${TOKEN_LIMITS.licenseText} characters maximum.`)
+  // A NUL byte would corrupt a text file and confuse tools.
   if (text.includes('\u0000')) throw new Error('Invalid license text: contains a NUL byte.')
 }

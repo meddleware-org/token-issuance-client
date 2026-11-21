@@ -1,3 +1,8 @@
+/**
+ * Tests for the downloadable source package (`src/package.ts`): every file is rendered in ONE pass (a value that looks like a placeholder is never rewritten), nothing of the
+ * template is left behind, the licence and policy text match the configuration, `Published.toml` and `deployments.md` are filled from a result, hostile text stays literal in every file,
+ * and the zip round-trips.
+ */
 import { describe, it, expect } from 'vitest'
 import { unzipSync, strFromU8 } from 'fflate'
 import { buildPackageFiles, generatePackageZip } from '../src/package.js'
@@ -5,6 +10,7 @@ import { TEMPLATE_BUILD_INFO } from '../src/template/artifact.js'
 import { TEMPLATE_FILES } from '../src/template/files.js'
 import type { PublishResult, TokenConfig } from '../src/types.js'
 
+// A valid configuration, the baseline every case changes one thing of.
 const baseConfig: TokenConfig = {
   packageName: 'my_token',
   moduleName: 'mytoken',
@@ -25,6 +31,7 @@ const baseConfig: TokenConfig = {
   projectName: 'My Project',
 }
 
+// The files every generated package must contain (the licence file is added only for a real licence).
 const REQUIRED = [
   'Move.toml',
   'Move.lock',
@@ -38,6 +45,7 @@ const REQUIRED = [
 ]
 
 describe('rendered source and docs are one-pass (F1)', () => {
+  // Sequential replacement would re-scan text a user value contributed: a description containing a placeholder would be rewritten and the source would disagree with the bytecode.
   it('a value containing another template key is not rewritten', () => {
     const cfg = { ...baseConfig, packageDescription: 'About XMODULENAMEX and TOKEN_ISSUANCE_TEMPLATE', description: 'see XSYMBOLX' }
     const f = buildPackageFiles({ config: cfg })
@@ -49,6 +57,7 @@ describe('rendered source and docs are one-pass (F1)', () => {
     expect(src).not.toContain('TEMPLATE_')
   })
 
+  // The generated README tells the next reader what the chain enforces and what wallets will show, in the words of the chosen policies.
   it('documents how the supply and metadata policies are enforced and what the registry shows', () => {
     const fixed = buildPackageFiles({ config: { ...baseConfig, initialSupply: 21n, supplyPolicy: 'fixed', metadataPolicy: 'frozen' } })['README.md'] as string
     expect(fixed).toContain('## Supply and metadata policies')
@@ -68,6 +77,7 @@ describe('buildPackageFiles', () => {
     expect(f['LICENSE']).toBe('MIT LICENSE\n...')
   })
 
+  // A leftover `X…X` placeholder or the template's own name in a downloaded package would be a visible mistake in the person's own project.
   it('leaves no unresolved placeholders or template identifiers', () => {
     const f = buildPackageFiles({ config: baseConfig, licenseText: 'x' })
     for (const [path, content] of Object.entries(f)) {
@@ -78,6 +88,7 @@ describe('buildPackageFiles', () => {
     }
   })
 
+  // The Move source is what the person keeps and recompiles: its identifiers and constants must be exactly the ones the bytecode was patched with.
   it('substitutes the Move source identifiers and named constants', () => {
     const src = buildPackageFiles({ config: baseConfig })['sources/mytoken.move']
     expect(src).toContain('module my_token::mytoken;')
@@ -89,10 +100,12 @@ describe('buildPackageFiles', () => {
     expect(src).toContain('MYTOKEN')
   })
 
+  // The licence appears in three places (Move.toml, the source header, the README); each is tested so a change in one is not missed in another.
   it('sets the Move.toml license field', () => {
     expect(buildPackageFiles({ config: baseConfig })['Move.toml']).toMatch(/^license = "MIT"$/m)
   })
 
+  // The template carries its own licence text; the downloaded package must carry the person's choice, not the template's.
   it('rewrites the licence header and README line for the 0BSD default, whatever the template ships with', () => {
     const f = buildPackageFiles({ config: { ...baseConfig, license: '0BSD', licenseName: 'BSD Zero Clause License' } })
     const src = f['sources/mytoken.move']!
@@ -104,6 +117,7 @@ describe('buildPackageFiles', () => {
     expect(f['Move.toml']).toMatch(/^license = "0BSD"$/m)
   })
 
+  // "No licence" is a real choice: the package says so and writes no LICENSE file, rather than carrying a licence nobody granted.
   it('handles a proprietary (NONE) license: no LICENSE file, UNLICENSED fields', () => {
     const cfg = { ...baseConfig, license: 'NONE' }
     const f = buildPackageFiles({ config: cfg, licenseText: 'ignored' })
@@ -113,6 +127,7 @@ describe('buildPackageFiles', () => {
     expect(f['README.md']).toContain('All rights reserved')
   })
 
+  // The patcher validates too, but the generator writes Move SOURCE, so it must not rely on a caller having validated first.
   it('refuses to generate from an unsafe config (defence in depth)', () => {
     // Values that bypass the form validator must still be rejected here so no
     // injectable Move source or shell script can ever be produced.
@@ -128,6 +143,7 @@ describe('buildPackageFiles', () => {
     expect(() => buildPackageFiles({ config: { ...baseConfig, iconUrl: 'http://x.io/a.png' } })).toThrow(/icon URL/)
   })
 
+  // After a deploy the downloaded package already records the ids, so the person need not copy them by hand.
   it('pre-fills deployments.md table in-place for the deployed network', () => {
     const result: PublishResult = {
       network: 'testnet', packageId: '0xPKG', coinType: '0xPKG::mytoken::MYTOKEN',
@@ -153,6 +169,7 @@ describe('buildPackageFiles', () => {
     expect(dep).toContain('mytoken = "0xPKG"')
   })
 
+  // An upgradeable package must not claim to be immutable.
   it('shows pending immutability when upgradeCapId is present', () => {
     const result: PublishResult = {
       network: 'testnet', packageId: '0xPKG', coinType: '0xPKG::mytoken::MYTOKEN',
@@ -203,6 +220,7 @@ describe('buildPackageFiles', () => {
     expect(f['Published.toml']).toContain('chain-id = "35834a8a"')
   })
 
+  // `Published.toml` names the toolchain that built the bytecode, so a later builder can reproduce it.
   it('records the toolchain that built the shipped bytecode', () => {
     const result: PublishResult = {
       network: 'testnet', packageId: '0xPKG', coinType: '0xPKG::mytoken::MYTOKEN',
@@ -213,6 +231,7 @@ describe('buildPackageFiles', () => {
     expect(pub).toContain('chain-id = "4c78adac"')
   })
 
+  // A throwaway chain has nothing durable to record, and a file naming it would mislead a later reader.
   it('writes no Published.toml for a localnet result (no durable chain id)', () => {
     const result: PublishResult = {
       network: 'localnet', packageId: '0xPKG', coinType: '0xPKG::mytoken::MYTOKEN',
@@ -230,6 +249,7 @@ describe('buildPackageFiles', () => {
 })
 
 describe('generatePackageZip', () => {
+  // The zip's single root folder is the package name, and unzipping gives back exactly the generated files.
   it('zips under a package-named root and round-trips', () => {
     const zip = generatePackageZip({ config: baseConfig, licenseText: 'MIT' })
     const entries = unzipSync(zip)
@@ -275,6 +295,7 @@ describe('Move.lock carries the template framework pin (template F7)', () => {
     expect(out).toContain('[pinned.testnet.Sui]')
   })
 
+  // The lock pins the framework revision the bytecode was built against; only the root package's name may change.
   it('differs from the template lock by exactly that one line', () => {
     const template = TEMPLATE_FILES['Move.lock'].split('\n')
     const out = lock().split('\n')
@@ -289,6 +310,7 @@ describe('Move.lock carries the template framework pin (template F7)', () => {
     expect(lock()).toContain(`rev = "${rev}"`)
   })
 
+  // The lock is part of the package a person downloads, so it must be in the archive too, not only in the file map.
   it('is part of the zip', () => {
     const entries = unzipSync(generatePackageZip({ config: baseConfig }))
     expect(strFromU8(entries['my_token/Move.lock']!)).toContain('[pinned.testnet.my_token]')
@@ -321,6 +343,7 @@ describe('literal-safe substitution in publish.sh and the README licence line (F
     expect(readme).not.toContain('BSD Zero Clause')
   })
 
+  // Text that looks like regular-expression or replacement syntax (`$&`, backslashes) must come through unchanged everywhere.
   it('renders hostile text fields literally in every generated file', () => {
     const f = buildPackageFiles({ config: { ...baseConfig, description: "x$&y$'z", packageDescription: 'p$`q$$r' } })
     expect(f['README.md']).toContain("x$&y$'z")

@@ -4,7 +4,12 @@
 //
 // Published.toml: since Sui 1.63 the CLI records deployed addresses there. The deployer bypasses the
 // CLI, so it is written whenever a testnet or mainnet PublishResult is supplied.
+//
+// Role: turn a validated `TokenConfig` into the source package a person can download, so the on-chain bytecode (patched by `template/patch.ts`) and the readable source they keep say the same
+// thing. Every value is substituted in ONE pass (a value containing another placeholder is never rewritten), and the configuration is validated first because these values end up in Move source.
+// Main exports: `buildPackageFiles`, `generatePackageZip`. Tested in `tests/package.test.ts`; the template text comes from `template/files.ts` (generated).
 
+// `fflate` zips the files (small, no dependencies); the rest are this package's own modules.
 import { strToU8, zipSync } from 'fflate'
 import { assertLicenseText, assertTokenConfig } from './rules.js'
 import { TEMPLATE_BUILD_INFO } from './template/artifact.js'
@@ -13,11 +18,13 @@ import type { PublishResult, TokenConfig, TokenNetwork } from './types.js'
 
 /** Escape a string for safe use as a literal RegExp. */
 function esc(s: string): string {
+  // The usual set of regular-expression metacharacters, each prefixed with a backslash.
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 /** Replace every occurrence of a plain-string needle. */
 function replaceAll(input: string, needle: string, value: string): string {
+  // A function replacer, so `$&` and friends in `value` are inserted literally.
   return input.replace(new RegExp(esc(needle), 'g'), () => value)
 }
 
@@ -27,12 +34,14 @@ function replaceAll(input: string, needle: string, value: string): string {
  * `XMODULENAMEX`) would be rewritten too and the outputs would disagree with the bytecode.
  */
 function replaceMany(input: string, map: Record<string, string>): string {
+  // Longest key first, so a key that is a prefix of another does not win the alternation.
   const keys = Object.keys(map).sort((a, b) => b.length - a.length)
   return input.replace(new RegExp(keys.map(esc).join('|'), 'g'), (m) => map[m] as string)
 }
 
 /** Apply the shared X…X documentation placeholders. */
 function applyDocPlaceholders(input: string, cfg: TokenConfig): string {
+  // The documentation placeholders of the template, each paired with the configuration value that replaces it.
   const map: Record<string, string> = {
     XPACKAGENAMEX: cfg.packageName,
     XMODULENAMEX: cfg.moduleName,
@@ -50,7 +59,7 @@ function applyDocPlaceholders(input: string, cfg: TokenConfig): string {
   return replaceMany(input, map)
 }
 
-// Chain ids of the public networks (hex short form). Localnet has none worth recording.
+/** Chain ids of the public networks (hex short form). Localnet has none worth recording. */
 const CHAIN_IDS: Partial<Record<TokenNetwork, string>> = {
   testnet: '4c78adac',
   mainnet: '35834a8a',
@@ -61,9 +70,11 @@ function chainIdOf(network: string): string | undefined {
   return Object.hasOwn(CHAIN_IDS, network) ? CHAIN_IDS[network as TokenNetwork] : undefined
 }
 
+/** True for a licence value that means "no open licence" (`NONE`, `UNLICENSED`, `NOASSERTION` or empty), whatever its case. */
 const isProprietary = (license: string) =>
   ['none', 'unlicensed', 'noassertion', ''].includes(license.trim().toLowerCase())
 
+/** The SPDX identifier to write: `UNLICENSED` for a proprietary package, otherwise the trimmed id. */
 function spdxId(license: string): string {
   return isProprietary(license) ? 'UNLICENSED' : license.trim()
 }
@@ -76,12 +87,16 @@ function spdxId(license: string): string {
  * @throws {Error} if the template's lock does not hold exactly that one line (template drift).
  */
 function renderMoveLock(cfg: TokenConfig): string {
+  // The one line that names the template's own package; every other pin is a framework dependency and stays.
   const rootPin = '[pinned.testnet.token_issuance_template]'
   const lines = TEMPLATE_FILES['Move.lock'].split('\n')
+  // Exactly one: zero or two means the template changed shape and this renderer must be updated, not guessed.
   if (lines.filter((l) => l === rootPin).length !== 1) {
     throw new Error(`template drift: expected exactly one line '${rootPin}' in Move.lock`)
   }
+  // Replace that whole line with the new package's name.
   const out = lines.map((l) => (l === rootPin ? `[pinned.testnet.${cfg.packageName}]` : l)).join('\n')
+  // And the template's name must appear nowhere else (a leftover would make the package name a lie).
   if (cfg.packageName !== 'token_issuance_template' && out.includes('token_issuance_template')) {
     throw new Error("template drift: the template identifier 'token_issuance_template' is still in Move.lock")
   }
@@ -90,6 +105,7 @@ function renderMoveLock(cfg: TokenConfig): string {
 
 /** Move.toml: package name + license field. */
 function renderMoveToml(cfg: TokenConfig): string {
+  // The package name first, then the licence field.
   let out = replaceAll(TEMPLATE_FILES['Move.toml'], 'token_issuance_template', cfg.packageName)
   out = out.replace(/^license = .*$/m, `license = "${spdxId(cfg.license)}"`)
   return out
@@ -100,6 +116,7 @@ function renderSource(cfg: TokenConfig): string {
   let out = TEMPLATE_FILES['source.move']
 
   // license header (lines 1-2) — always rewritten, whatever licence the template itself carries
+  // The first two lines of the template are its licence header; both are rewritten for the chosen licence.
   const lines = out.split('\n')
   if (isProprietary(cfg.license)) {
     lines[0] = '// SPDX-License-Identifier: UNLICENSED'
@@ -111,6 +128,7 @@ function renderSource(cfg: TokenConfig): string {
   out = lines.join('\n')
 
   // One pass: user values are never re-scanned for template keys.
+  // Each key is a whole line or token of the template (so it cannot match inside user text), and the values are the configuration, already validated.
   return replaceMany(out, {
     'module token_issuance_template::token_issuance_template;': `module ${cfg.packageName}::${cfg.moduleName};`,
     TOKEN_ISSUANCE_TEMPLATE: cfg.structName,
@@ -121,6 +139,7 @@ function renderSource(cfg: TokenConfig): string {
     'b"TEMPLATE_NAME"': `b"${cfg.name}"`,
     'b"TEMPLATE_DESCRIPTION"': `b"${cfg.description}"`,
     'b"TEMPLATE_ICON_URL"': `b"${cfg.iconUrl}"`,
+    // The supply is written in base units (whole tokens scaled by the decimals), which is what the contract mints.
     'const INITIAL_SUPPLY: u64 = 1_000_000_007;': `const INITIAL_SUPPLY: u64 = ${cfg.initialSupply * 10n ** BigInt(cfg.decimals)};`,
     'const FIXED_SUPPLY: bool = true;': `const FIXED_SUPPLY: bool = ${cfg.supplyPolicy === 'fixed'};`,
     'const FROZEN_METADATA: bool = false;': `const FROZEN_METADATA: bool = ${cfg.metadataPolicy === 'frozen'};`,
@@ -145,6 +164,7 @@ const TEMPLATE_LICENSE_LINE = /^(?:CC0 1\.0 Universal|BSD Zero Clause License).*
  * transaction, so the coin registry records them and registry-based wallets and explorers can show them.
  */
 function policyNote(cfg: TokenConfig): string {
+  // One bullet per policy, in plain language, for the generated README: it tells the next reader what the chain enforces.
   const lines = ['## Supply and metadata policies', '']
   lines.push(
     cfg.supplyPolicy === 'fixed'
@@ -164,12 +184,14 @@ function policyNote(cfg: TokenConfig): string {
   return `\n${lines.join('\n')}\n`
 }
 
+/** The generated README: the template's, with placeholders and the licence line replaced and the policy note appended. */
 function renderReadme(cfg: TokenConfig): string {
   const out = applyDocPlaceholders(TEMPLATE_FILES['README.md'], cfg)
   const licenseName = cfg.licenseName || spdxId(cfg.license)
   return `${renderReadmeLicense(out, cfg, licenseName).trimEnd()}\n${policyNote(cfg)}`
 }
 
+/** The README with its licence line replaced by one for the chosen licence (or a proprietary notice). */
 function renderReadmeLicense(out: string, cfg: TokenConfig, licenseName: string): string {
   const line = isProprietary(cfg.license)
     ? 'All rights reserved. This package is proprietary and not licensed for redistribution.'
@@ -194,6 +216,7 @@ function fillRow(section: string, fieldName: string, value: string): string {
  * Operates on the substring between the section header and the next `## ` heading.
  */
 function fillNetworkSection(doc: string, network: string, result: PublishResult): string {
+  // The section for this network, found by its heading; a document with no such section is returned unchanged.
   const header = `## ${network.charAt(0).toUpperCase() + network.slice(1)}\n`
   const start = doc.indexOf(header)
   if (start === -1) return doc
@@ -203,11 +226,13 @@ function fillNetworkSection(doc: string, network: string, result: PublishResult)
 
   let section = doc.slice(start, end)
 
+  // The rows for what exists; a cap that was never created leaves its row as the template's placeholder.
   section = fillRow(section, 'Package ID', result.packageId)
   if (result.treasuryCapId) section = fillRow(section, 'TreasuryCap ID', result.treasuryCapId)
   if (result.metadataCapId) section = fillRow(section, 'MetadataCap ID', result.metadataCapId)
   if (result.currencyId) section = fillRow(section, 'Currency object ID', result.currencyId)
 
+  // Upgradeable: the cap exists, so "immutability" is not (yet) true. Immutable: the cap was burned in the publish transaction.
   if (result.upgradeCapId) {
     section = fillRow(section, 'UpgradeCap ID (burned)', result.upgradeCapId)
     section = section.replace(
@@ -222,6 +247,7 @@ function fillNetworkSection(doc: string, network: string, result: PublishResult)
     )
   }
 
+  // The deployment time, in UTC to the second (the one place the output depends on the clock).
   const deployed = new Date().toISOString().replace('T', ' ').split('.')[0] + ' UTC'
   section = fillRow(section, 'Deployed', deployed)
 
@@ -231,6 +257,7 @@ function fillNetworkSection(doc: string, network: string, result: PublishResult)
 /** Optionally fill deployments.md with the just-published IDs. */
 function renderDeployments(cfg: TokenConfig, result?: PublishResult): string {
   let out = applyDocPlaceholders(TEMPLATE_FILES['deployments.md'], cfg)
+  // Without a result (a package generated before deploying) the placeholders stay for the person to fill in.
   if (!result) return out
 
   // Fill the network-specific table section with known artefact IDs
@@ -258,8 +285,10 @@ function renderDeployments(cfg: TokenConfig, result?: PublishResult): string {
  * Commit Published.toml to source control; add Pub.*.toml (ephemeral) to .gitignore.
  */
 function renderPublishedToml(result: PublishResult): string | null {
+  // Only the public networks have a durable chain id.
   const chainId = chainIdOf(result.network)
   if (!chainId) return null // localnet: an ephemeral chain, nothing durable to record
+  // The same keys the Sui CLI writes (version 1, the toolchain the template was built with, the 2024 edition).
   const lines = [
     `[published.${result.network}]`,
     `chain-id = "${chainId}"`,
@@ -269,6 +298,7 @@ function renderPublishedToml(result: PublishResult): string | null {
     `toolchain-version = "${TEMPLATE_BUILD_INFO.toolchainVersion}"`,
     `build-config = { flavor = "sui", edition = "2024" }`,
   ]
+  // An upgradeable package records its cap; an immutable one says so in a comment.
   if (result.upgradeCapId) {
     lines.push(`upgrade-capability = "${result.upgradeCapId}"`)
   } else {
@@ -279,7 +309,9 @@ function renderPublishedToml(result: PublishResult): string | null {
   return lines.join('\n') + '\n'
 }
 
+/** What the package generators accept. */
 export interface GeneratePackageOptions {
+  /** The token's choices (validated before anything is written). */
   config: TokenConfig
   /** Full license text; when omitted for a real license, no LICENSE file is written. */
   licenseText?: string
@@ -290,6 +322,7 @@ export interface GeneratePackageOptions {
 /** Build the in-memory file map for the generated package. */
 export function buildPackageFiles(opts: GeneratePackageOptions): Record<string, string> {
   const { config, licenseText } = opts
+  // Validate first: these values are written into Move source and documents.
   assertTokenConfig(config)
   if (licenseText) assertLicenseText(licenseText)
   const out: Record<string, string> = {
@@ -306,6 +339,7 @@ export function buildPackageFiles(opts: GeneratePackageOptions): Record<string, 
   // Published.toml records the deployed address per environment (Sui ≥ 1.63 convention).
   const published = opts.result ? renderPublishedToml(opts.result) : null
   if (published) out['Published.toml'] = published
+  // A LICENSE file only for a real licence with its text supplied.
   if (!isProprietary(config.license) && licenseText) {
     out['LICENSE'] = licenseText
   }
@@ -316,6 +350,7 @@ export function buildPackageFiles(opts: GeneratePackageOptions): Record<string, 
 export function generatePackageZip(opts: GeneratePackageOptions): Uint8Array {
   const filesMap = buildPackageFiles(opts)
   const zipInput: Record<string, Uint8Array> = {}
+  // Everything goes under one folder named for the package, so unzipping does not scatter files.
   const root = opts.config.packageName
   for (const [path, content] of Object.entries(filesMap)) {
     zipInput[`${root}/${path}`] = strToU8(content)

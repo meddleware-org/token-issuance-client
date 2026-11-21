@@ -1,3 +1,7 @@
+/**
+ * Tests for the transaction builders (`src/transactions.ts`) and the publish-result reader: the exact commands and amounts of the publish transaction (the fee is split exactly and sent to a
+ * valid address only), what the finalize transaction moves under each policy, and the refusal of object ids that cannot exist. Transactions are inspected as data; nothing is signed.
+ */
 import { describe, it, expect } from 'vitest'
 import type { Transaction } from '@mysten/sui/transactions'
 import { fromBase64 } from '@mysten/sui/utils'
@@ -16,12 +20,15 @@ const coinType = '0xPKG::mytoken::MYTOKEN'
 
 // ─── introspection helpers over Transaction.getData() ─────────────────────────
 
+/** One command of a transaction. */
 type Cmd = ReturnType<Transaction['getData']>['commands'][number]
 
+/** All the commands of a transaction. */
 function commands(tx: Transaction): Cmd[] {
   return tx.getData().commands
 }
 
+/** The commands of one kind (`MoveCall`, `SplitCoins`, …), typed. */
 function byKind<K extends Cmd['$kind']>(tx: Transaction, kind: K): Extract<Cmd, { $kind: K }>[] {
   return commands(tx).filter((c): c is Extract<Cmd, { $kind: K }> => c.$kind === kind)
 }
@@ -34,14 +41,17 @@ function pureBytesOfInput(tx: Transaction, arg: unknown): Uint8Array {
   return fromBase64(input.Pure.bytes)
 }
 
+/** A pure address argument's bytes as `0x` + 64 hex digits. */
 function pureAddr(bytes: Uint8Array): string {
   return '0x' + Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
+/** A pure u64 argument's bytes as a bigint (little-endian). */
 function pureU64(bytes: Uint8Array): bigint {
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigUint64(0, true)
 }
 
+/** A valid token configuration with `over` applied. */
 function baseConfig(over: Partial<TokenConfig> = {}): TokenConfig {
   return {
     packageName: 'my_token', moduleName: 'mytoken', structName: 'MYTOKEN',
@@ -53,6 +63,7 @@ function baseConfig(over: Partial<TokenConfig> = {}): TokenConfig {
   }
 }
 
+/** Valid publish arguments (a 1,000,000 MIST fee to a full address) with `over` applied. */
 const publishArgs = (over: Partial<Parameters<typeof buildPublishTransaction>[0]> = {}) => ({
   moduleBytes: new Uint8Array([1, 2, 3]),
   sender,
@@ -64,6 +75,7 @@ const publishArgs = (over: Partial<Parameters<typeof buildPublishTransaction>[0]
 })
 
 describe('fee recipient', () => {
+  // A misconfigured consumer must never burn the fee to 0x0 or send it to a zero-padded truncated address.
   it('refuses a zero, truncated or malformed fee recipient when a fee is charged', () => {
     for (const bad of ['0x' + '0'.repeat(64), '0x12ab', 'nope', '']) {
       expect(() => buildPublishTransaction(publishArgs({ feeRecipient: bad })), bad).toThrow(/fee recipient/)
@@ -86,6 +98,7 @@ describe('buildPublishTransaction', () => {
     expect(tx.getData().gasData.budget).toBe('500000000')
   })
 
+  // The amount is the one the person was shown; a wrong split would charge more or less than the quoted fee.
   it('splits EXACTLY the fee from the gas coin to the configured treasury', () => {
     const tx = buildPublishTransaction(publishArgs({ feeMist: 1_000_000_000n }))
     const [split] = byKind(tx, 'SplitCoins')
@@ -103,6 +116,7 @@ describe('buildPublishTransaction', () => {
     expect(byKind(tx, 'SplitCoins')).toHaveLength(0)
   })
 
+  // The cap is destroyed in the same transaction as the publish, so there is no window in which the package could be upgraded.
   it('makes the package immutable under the immutable policy', () => {
     const tx = buildPublishTransaction(publishArgs({ packagePolicy: 'immutable' }))
     const calls = byKind(tx, 'MoveCall')
@@ -126,12 +140,14 @@ describe('buildPublishTransaction', () => {
 
 // ─── buildFinalizeTransaction ─────────────────────────────────────────────────
 
+// The objects `init` would have left with the sender, as fixture ids.
 const treasuryCapId = '0x' + 'a'.repeat(64)
 const metadataCapId = '0x' + 'b'.repeat(64)
 const initialCoinId = '0x' + 'd'.repeat(64)
 const currencyRef = { objectId: '0x' + 'c'.repeat(64), version: '1', digest: 'CURRENCYDIGEST' }
 
 /** The objects `init` leaves with the sender under `config`'s policies. */
+/** Finalize arguments with every object present (callers drop what the policy says cannot exist). */
 const finalizeArgs = (config: TokenConfig) => ({
   config,
   coinType,
@@ -168,6 +184,7 @@ describe('buildFinalizeTransaction', () => {
     expect(byKind(tx, 'TransferObjects')).toHaveLength(0)
   })
 
+  // Minting or freezing here would be a second chance to change what the registry records; the policies were applied once, at publish.
   it('never mints or freezes: init applied the policies in the publish transaction', () => {
     for (const config of [
       baseConfig({ recipient, initialSupply: 1000n }),
@@ -188,6 +205,7 @@ describe('buildFinalizeTransaction', () => {
     expect(t.TransferObjects.objects).toHaveLength(3)
   })
 
+  // Under those policies no cap exists, so the transaction must not name one.
   it('moves only what exists: a fixed supply with frozen metadata is just the minted coin', () => {
     const tx = buildFinalizeTransaction(
       finalizeArgs(baseConfig({ recipient, initialSupply: 7n, supplyPolicy: 'fixed', metadataPolicy: 'frozen' })),
@@ -200,6 +218,7 @@ describe('buildFinalizeTransaction', () => {
     expect(byKind(tx, 'TransferObjects')).toHaveLength(0)
   })
 
+  // A caller that wires the wrong result into finalize (a cap under a policy that has none) must be stopped before a transaction is built.
   it('refuses ids that cannot exist under the policy', () => {
     const fixed = baseConfig({ initialSupply: 1n, supplyPolicy: 'fixed' })
     expect(() => buildFinalizeTransaction({ ...finalizeArgs(fixed), treasuryCapId })).toThrow(/fixed supply has no TreasuryCap/)
@@ -226,6 +245,7 @@ describe('buildFinalizeTransaction', () => {
 describe('extractPublishResult', () => {
   const PKG = '0x' + 'a1'.repeat(32)
   const COIN = `${PKG}::mytoken::MYTOKEN`
+  /** A distinct 32-byte id per number. */
   const id = (n: number) => '0x' + n.toString(16).padStart(64, '0')
   const ctx = { network: 'testnet' as const, digest: 'DIG', feeRecipient: recipient, feeMist: 1_000_000_000n }
   const changes = [

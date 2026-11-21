@@ -1,12 +1,21 @@
+/**
+ * Tests for the bytecode patcher (`src/template/patch.ts`): identifiers and constants are rewritten and the result decodes, a value that is a template placeholder is refused (it would
+ * land in the wrong slot), every slot is resolved from the pristine pool, equal constants are merged because the verifier rejects duplicates, and the supply and policy flags land in
+ * their own constants. The real WASM and the real compiled template are used (no doubles): this is the closest an offline test gets to the bytes a person publishes.
+ */
 import { describe, it, expect } from 'vitest'
 import init, { deserialize } from '@mysten/move-bytecode-template'
 import { patchTemplateModule } from '../src/template/patch.js'
 import { TEMPLATE_DEFAULTS } from '../src/template/artifact.js'
 
+/** The text of a string constant's bytes (the first byte is the length prefix, dropped). */
 const asStr = (data: number[]) => Buffer.from(data.slice(1)).toString('utf8')
 
+/** The parts of a decoded module these tests read. */
 interface Decoded {
+  /** The identifier table. */
   identifiers: string[]
+  /** The constant pool. */
   constant_pool: { type_: unknown; data: number[] }[]
 }
 
@@ -90,8 +99,7 @@ describe('patchTemplateModule', () => {
   })
 })
 
-// Temporary test to check Walrus blob URL patching
-
+// A value equal to a template default would capture the wrong constant-pool slot; the patcher refuses it and resolves every slot from the untouched pool.
 describe('patchTemplateModule placeholder-valued inputs (F1)', () => {
   const base = { moduleName: 'mycoin', structName: 'MYCOIN', symbol: 'MYC', name: 'My Coin', description: 'desc', iconUrl: 'https://example.com/i.png', decimals: 6 }
 
@@ -124,6 +132,7 @@ describe('patchTemplateModule placeholder-valued inputs (F1)', () => {
   })
 })
 
+// A module named like an identifier the template already uses would duplicate it and fail verification on-chain.
 describe('patchTemplateModule identifier guard', () => {
   it('refuses a module name that duplicates an identifier the template uses', async () => {
     await (init as unknown as () => Promise<unknown>)()
@@ -173,13 +182,16 @@ describe('patchTemplateModule supply and metadata policy', () => {
   })
 })
 
+// The bytecode verifier rejects a pool with duplicate entries, after the person has paid; patching can create them, so they are merged and every load instruction is repointed.
 describe('patched constant pool has no duplicates (the verifier rejects them) and LdConst follows the merge', () => {
+  /** A decoded module that also exposes function code, so the loaded constants can be followed. */
   interface Full extends Decoded {
+    /** The functions, whose code holds the load-constant instructions. */
     function_defs: { code?: { code?: unknown[] } | null }[]
   }
   const base = { moduleName: 'mycoin', structName: 'MYCOIN', symbol: 'MYC', name: 'My Coin', description: 'desc', iconUrl: 'https://example.com/i.png', decimals: 6 }
 
-  /** The value each LdConst loads, as `type:bytes`, over every function. */
+  /** The value each LdConst loads, as `type:bytes`, over every function: after a merge each load must still produce its own value. */
   const loaded = (back: Full): string[] =>
     back.function_defs.flatMap((d) =>
       (d.code?.code ?? []).flatMap((ins) => {
@@ -188,6 +200,7 @@ describe('patched constant pool has no duplicates (the verifier rejects them) an
         return [`${JSON.stringify(c.type_)}:${c.data.join(',')}`]
       }),
     )
+  /** A string constant as `loaded` renders it (type and bytes). */
   const str = (v: string) => `${JSON.stringify({ Vector: 'U8' })}:${[v.length, ...Buffer.from(v)].join(',')}`
 
   it('merges a symbol and a name that are equal, and every constant still loads its own value', async () => {
