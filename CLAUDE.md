@@ -105,6 +105,10 @@ npm run e2e:localnet                                                        # re
 - **The localnet end to end needs the `sui` CLI and spends nothing real**; it refuses a public chain identifier unless `E2E_ALLOW_PUBLIC=1`.
 - **There is no `mw-audit-gate`.** This repository does not depend on `@meddleware/frontend-config`; CI runs `npm audit --audit-level=high`.
 
+## Documentation rules (workspace documentation standard, D144)
+
+Every file has a header and every declaration a TSDoc comment (private declarations included); comments say why. `node scripts/check-docs.mjs --report token-issuance-client` (in the workspace repository) is the gate. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Related
 
 - The audit: [`docs/audit/token-issuance-client-audit.md`](docs/audit/token-issuance-client-audit.md).
